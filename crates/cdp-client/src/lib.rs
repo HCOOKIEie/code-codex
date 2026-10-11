@@ -12,6 +12,44 @@ use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
 
+type DiagnosticObserver = fn(&str, &str, &str, Value);
+static DIAGNOSTIC_OBSERVER: std::sync::OnceLock<DiagnosticObserver> = std::sync::OnceLock::new();
+/// Metadata-only observer. Never echoes attacker-selected request IDs or payloads.
+pub fn set_diagnostic_observer(observer: DiagnosticObserver) {
+    let _ = DIAGNOSTIC_OBSERVER.set(observer);
+}
+fn observe_rejection(phase: &str, details: Value) {
+    static WINDOW: std::sync::OnceLock<StdMutex<(Instant, u32, u64)>> = std::sync::OnceLock::new();
+    let Some(observer) = DIAGNOSTIC_OBSERVER.get() else {
+        return;
+    };
+    let Ok(mut window) = WINDOW
+        .get_or_init(|| StdMutex::new((Instant::now(), 0, 0)))
+        .lock()
+    else {
+        return;
+    };
+    if window.0.elapsed() >= Duration::from_secs(10) {
+        let suppressed = window.2;
+        *window = (Instant::now(), 0, 0);
+        if suppressed > 0 {
+            observer(
+                "cdp-security",
+                "rejected ingress observations",
+                "throttled",
+                json!({"suppressedCount":suppressed}),
+            );
+        }
+    }
+    window.1 += 1;
+    if window.1 > 12 {
+        window.2 += 1;
+        return;
+    }
+    drop(window);
+    observer("cdp-security", phase, "rejected", details);
+}
+
 use async_trait::async_trait;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -2070,11 +2108,16 @@ async fn authorize_binding_request<H>(
 where
     H: BridgeHandler,
 {
-    let Ok(request) = gate.authorize(payload).await else {
-        // Unauthenticated, malformed, replayed, and rate-excess traffic is
-        // silently dropped. Echoing an attacker-selected ID lets an iframe
-        // reject a legitimate renderer promise with the same predictable ID.
-        return Ok(());
+    let request = match gate.authorize(payload).await {
+        Ok(request) => request,
+        Err(error) => {
+            // Local metadata only. Never echo IDs to unauthenticated callers.
+            observe_rejection(
+                "binding authorization",
+                json!({"code":error.code,"payloadBytes":payload.len(),"documentQualified":document_qualified,"payloadOmitted":true}),
+            );
+            return Ok(());
+        }
     };
     if document_qualified {
         dispatch_request(
@@ -2088,6 +2131,11 @@ where
     } else {
         if pending_requests.len() < MAX_IN_FLIGHT_REQUESTS {
             pending_requests.push_back(request);
+        } else {
+            observe_rejection(
+                "pending request capacity",
+                json!({"code":"REQUEST_CAPACITY","limit":MAX_IN_FLIGHT_REQUESTS,"documentQualified":false}),
+            );
         }
         Ok(())
     }
@@ -2343,6 +2391,10 @@ fn bounded_binding_payload<'a>(message: &'a Value, binding_name: &str) -> Option
     let params = message.get("params")?;
     let payload = params.get("payload").and_then(Value::as_str)?;
     if payload.len() > MAX_BINDING_PAYLOAD_BYTES {
+        observe_rejection(
+            "binding payload limit",
+            json!({"code":"INVALID_REQUEST","payloadBytes":payload.len(),"limit":MAX_BINDING_PAYLOAD_BYTES,"payloadOmitted":true}),
+        );
         return None;
     }
     Some(payload)

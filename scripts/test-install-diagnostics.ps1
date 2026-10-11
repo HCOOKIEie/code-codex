@@ -5,12 +5,14 @@ $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$errors)
 if ($errors.Count -gt 0) { throw 'Installer script has syntax errors.' }
 
-foreach ($name in @('Invoke-InstallFileOperation', 'Write-InstallDiagnostic')) {
+foreach ($name in @('Trace-Install', 'Invoke-InstallFileOperation', 'Write-InstallDiagnostic')) {
     $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
     if ($null -eq $definition) { throw "Installer diagnostic function missing: $name" }
     . ([scriptblock]::Create($definition.Extent.Text))
 }
 
+$script:InstallTrace = [Collections.Generic.List[object]]::new()
+$script:InstallClock = [Diagnostics.Stopwatch]::StartNew()
 $script:InstallStage = 'Installing application files'
 $script:InstallOperation = ''
 $script:InstallTarget = ''
@@ -61,6 +63,7 @@ try {
     try { Write-InstallDiagnostic $record }
     finally { [Console]::SetOut($oldOutput) }
     $report = $captured.ToString().Trim().Substring('CODECODEX_INSTALL_ERROR:'.Length) | ConvertFrom-Json
+    if ($report.timeline.Count -lt 2 -or $report.exceptionChain.Count -lt 1) { throw 'Installer timeline or exception chain missing.' }
     $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($report.messageBase64))
     if ($decoded -ne $localized) { throw 'Localized error text was not preserved as UTF-8.' }
     Write-Output 'Installer move diagnostics and Chinese error encoding passed.'

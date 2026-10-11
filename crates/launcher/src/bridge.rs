@@ -89,6 +89,25 @@ const MIN_UPDATE_ASSET_BYTES: u64 = 256 * 1024;
 const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const UPDATE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const UPDATE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(180);
+#[cfg(windows)]
+static UPDATE_INSTALLER_ACTIVE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[derive(Clone)]
+struct UpdateProgress {
+    sender: Option<broadcast::Sender<BridgeNotification>>,
+    epoch: u64,
+    version: String,
+}
+impl UpdateProgress {
+    fn publish(&self, phase: &str, details: Value) {
+        crate::runtime_log::record("update", phase, "progress", details.clone());
+        if let Some(sender) = &self.sender {
+            let _ = sender.send(BridgeNotification { lifecycle_epoch:self.epoch,
+                payload:json!({"method":"explorer.update.progress","params":{"latestVersion":self.version,"phase":phase,"details":details}}) });
+        }
+    }
+}
 const GIT_COMMAND_TIMEOUT: Duration = Duration::from_secs(8);
 const DEFAULT_GIT_HISTORY_LIMIT: usize = 50;
 const MAX_GIT_HISTORY_LIMIT: usize = 100;
@@ -244,6 +263,7 @@ struct UpdateInstallParams {
 struct UpdateInstallResult {
     latest_version: String,
     launched: bool,
+    window_ready: bool,
 }
 
 impl UpdateChecker {
@@ -398,6 +418,7 @@ impl UpdateChecker {
         &self,
         current_version: &str,
         expected_latest_version: &str,
+        progress: &UpdateProgress,
     ) -> Result<DownloadedUpdate, BridgeError> {
         let mut operation = crate::runtime_log::Operation::start(
             "update",
@@ -405,7 +426,12 @@ impl UpdateChecker {
             json!({"currentVersion":current_version,"requestedVersion":expected_latest_version}),
         );
         let result = self
-            .download_installer_inner(current_version, expected_latest_version, &operation)
+            .download_installer_inner(
+                current_version,
+                expected_latest_version,
+                &operation,
+                progress,
+            )
             .await;
         match &result {
             Ok(_) => operation.finish("passed", json!({"integrityVerified":true})),
@@ -418,7 +444,9 @@ impl UpdateChecker {
         current_version: &str,
         expected_latest_version: &str,
         operation: &crate::runtime_log::Operation,
+        progress: &UpdateProgress,
     ) -> Result<DownloadedUpdate, BridgeError> {
+        progress.publish("checking release", json!({}));
         let release = self.fetch_release(current_version).await?;
         let update = classify_update(current_version, release.clone())?;
         if update.status != UpdateAvailability::UpdateAvailable
@@ -429,6 +457,10 @@ impl UpdateChecker {
         let asset = select_update_asset(&release, &update.latest_version)?;
         let expected_digest =
             validate_update_asset(asset, &release.tag_name, &update.latest_version)?;
+        progress.publish(
+            "downloading",
+            json!({"expectedBytes":asset.size,"receivedBytes":0,"percent":0}),
+        );
         operation.event("installer asset","selected",json!({"releaseTag":release.tag_name,"expectedBytes":asset.size,"expectedSha256":expected_digest}));
         let download_client = self
             .download_client
@@ -459,13 +491,14 @@ impl UpdateChecker {
 
         let directory = tempfile::Builder::new()
             .prefix("CodeCodex-Update-")
-            .tempdir()
+            .tempdir_in(workspace_service::application_paths::temp_root().map_err(|_| update_download_error())?)
             .map_err(|_| update_download_error())?;
         let installer_path = directory.path().join(&asset.name);
         let mut file =
             std::fs::File::create(&installer_path).map_err(|_| update_download_error())?;
         let mut digest = sha2::Sha256::new();
         let mut downloaded = 0_u64;
+        let mut last_percent = 0;
         let mut transfer=crate::network_diagnostics::TransferProgress::new();
         while let Some(chunk) = response
             .chunk()
@@ -480,7 +513,13 @@ impl UpdateChecker {
                 .map_err(|_| update_download_error())?;
             sha2::Digest::update(&mut digest, &chunk);
             transfer.observe(&trace.operation,downloaded,asset.size);
+            let percent = downloaded.saturating_mul(100) / asset.size.max(1);
+            if percent > last_percent {
+                last_percent = percent;
+                progress.publish("downloading", json!({"receivedBytes":downloaded,"expectedBytes":asset.size,"percent":percent.min(100)}));
+            }
         }
+        progress.publish("verifying", json!({"receivedBytes":downloaded}));
         file.sync_all().map_err(|_| update_download_error())?;
         drop(file);
         let observed_digest=format!("{:x}",sha2::Digest::finalize(digest));
@@ -651,20 +690,85 @@ fn trusted_update_download_host(url: &url::Url) -> bool {
 
 #[cfg(windows)]
 fn launch_downloaded_update(update: DownloadedUpdate) -> Result<UpdateInstallResult, BridgeError> {
+    if UPDATE_INSTALLER_ACTIVE.swap(true, Ordering::AcqRel) {
+        return Err(update_busy_error());
+    }
+    let ready_path = update.directory.path().join("window-ready");
+    let mut operation = crate::runtime_log::Operation::start(
+        "update",
+        "installer window handoff",
+        json!({"latestVersion":update.latest_version,"timeoutMs":15000}),
+    );
     let mut child = Command::new(&update.installer_path)
+        .env("CLE_UPDATE_WINDOW_READY", &ready_path)
         .spawn()
-        .map_err(|_| update_launch_error())?;
+        .map_err(|error| {
+            UPDATE_INSTALLER_ACTIVE.store(false, Ordering::Release);
+            operation.finish("failed",json!({"phase":"spawn","osCode":error.raw_os_error(),"kind":format!("{:?}",error.kind())}));
+            update_launch_error()
+        })?;
+    operation.event("installer process", "started", json!({"pid":child.id()}));
+    let started = Instant::now();
+    let outcome =
+        await_installer_window(&mut child, &ready_path, Duration::from_secs(15), &operation);
+    let window_ready = outcome.as_ref().copied().unwrap_or(false);
+    let failure = outcome.err();
+    operation.finish(if window_ready {"passed"} else if failure.is_some() {"failed"} else {"timeout"}, json!({"windowReady":window_ready,"durationMs":started.elapsed().as_millis(),"installationComplete":false,"processNotTerminated":true}));
     let retained_directory = update.directory.keep();
     let installer_path = update.installer_path;
     thread::spawn(move || {
         let _ = child.wait();
+        UPDATE_INSTALLER_ACTIVE.store(false, Ordering::Release);
         let _ = std::fs::remove_file(installer_path);
+        let _ = std::fs::remove_file(ready_path);
         let _ = std::fs::remove_dir(retained_directory);
     });
+    if let Some(error) = failure {
+        return Err(error);
+    }
     Ok(UpdateInstallResult {
         latest_version: update.latest_version,
         launched: true,
+        window_ready,
     })
+}
+
+#[cfg(windows)]
+fn await_installer_window(
+    child: &mut std::process::Child,
+    ready_path: &Path,
+    budget: Duration,
+    operation: &crate::runtime_log::Operation,
+) -> Result<bool, BridgeError> {
+    let started = Instant::now();
+    loop {
+        if std::fs::read_to_string(ready_path).is_ok_and(|s| s == "ready") {
+            return Ok(true);
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                operation.event(
+                    "installer process",
+                    "exited",
+                    json!({"exitCode":status.code()}),
+                );
+                return Err(BridgeError::new(
+                    "UPDATE_INSTALLER_EARLY_EXIT",
+                    "The installer exited before its window appeared. Check the installation diagnostic report.",
+                ));
+            }
+            Err(error) => {
+                operation.event(
+                    "installer process",
+                    "failed",
+                    json!({"osCode":error.raw_os_error(),"kind":format!("{:?}",error.kind())}),
+                );
+                return Err(update_launch_error());
+            }
+            _ if started.elapsed() >= budget => return Ok(false),
+            _ => thread::sleep(Duration::from_millis(50)),
+        }
+    }
 }
 
 #[cfg(not(windows))]
@@ -3262,6 +3366,10 @@ impl NativeBridge {
     }
 
     async fn update_install(&self, params: Value, epoch: u64) -> Result<Value, BridgeError> {
+        #[cfg(windows)]
+        if UPDATE_INSTALLER_ACTIVE.load(Ordering::Acquire) {
+            return Err(update_busy_error());
+        }
         self.ensure_epoch(epoch)?;
         let params: UpdateInstallParams =
             serde_json::from_value(params).map_err(|_| BridgeError::invalid_request())?;
@@ -3281,10 +3389,34 @@ impl NativeBridge {
         let update = self
             .inner
             .update_checker
-            .download_installer(env!("CARGO_PKG_VERSION"), &params.latest_version)
+            .download_installer(
+                env!("CARGO_PKG_VERSION"),
+                &params.latest_version,
+                &UpdateProgress {
+                    sender: self.inner.notification_sender.read().await.clone(),
+                    epoch,
+                    version: params.latest_version.clone(),
+                },
+            )
             .await?;
         self.ensure_epoch(epoch)?;
-        let result = launch_downloaded_update(update)?;
+        let progress = UpdateProgress {
+            sender: self.inner.notification_sender.read().await.clone(),
+            epoch,
+            version: params.latest_version.clone(),
+        };
+        progress.publish("waiting for installer window", json!({"timeoutMs":15000}));
+        let result = tokio::task::spawn_blocking(move || launch_downloaded_update(update))
+            .await
+            .map_err(|_| update_internal_error())??;
+        progress.publish(
+            if result.window_ready {
+                "installer window shown"
+            } else {
+                "installer window unconfirmed"
+            },
+            json!({"windowReady":result.window_ready,"installationComplete":false}),
+        );
         serde_json::to_value(result).map_err(|_| update_internal_error())
     }
 
@@ -3597,6 +3729,14 @@ impl BridgeHandler for NativeBridge {
         let result = async {
             self.ensure_epoch(epoch)?;
             match request.method.as_str() {
+                "explorer.storage.request" => {
+                  let context=crate::renderer_storage::request_context(&request.params);
+                  crate::renderer_storage::request(request.params).map_err(|e| {
+                    crate::runtime_log::record("storage","native persistence","failed",json!({"code":"STORAGE_FAILED","requestContext":context,"ioKind":format!("{:?}",e.kind()),"osErrorCode":e.raw_os_error(),"errorChain":crate::network_diagnostics::error_details(&e)["errorChain"]}));
+                    BridgeError::new("STORAGE_FAILED",format!("Code-Codex storage failed: {e}"))
+                  })
+                },
+                "explorer.runtime.check" => Ok(crate::support_checks::run().await),
                 "explorer.runtime.list" => {
                     crate::runtime_log::list().map_err(|e| BridgeError::new("RUNTIME_LOG", e))
                 }
@@ -7210,5 +7350,73 @@ mod tests {
         assert_eq!(context.thread_id.as_deref(), Some("thread-b"));
         assert_eq!(context.workspace.root_path(), second_workspace.path());
         server.await.expect("server task");
+    }
+}
+
+#[cfg(all(test, windows))]
+mod update_handoff_tests {
+    use super::*;
+    use std::os::windows::process::CommandExt;
+    fn child(script: &str, ready: &Path) -> std::process::Child {
+        let mut command =
+            Command::new(crate::process_guard::trusted_powershell().expect("PowerShell"));
+        command
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .env("TEST_READY", ready)
+            .creation_flags(0x08000000)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        command.spawn().expect("fixture process")
+    }
+    #[test]
+    fn installer_window_wait_requires_ack_and_distinguishes_exit_from_timeout() {
+        let dir = tempfile::tempdir().expect("fixture dir");
+        let ready = dir.path().join("window-ready");
+        let op = crate::runtime_log::Operation::start("update", "fixture handoff", json!({}));
+        let mut delayed = child(
+            "Start-Sleep -Milliseconds 250; [IO.File]::WriteAllText($env:TEST_READY,'ready'); Start-Sleep -Seconds 1",
+            &ready,
+        );
+        let started = Instant::now();
+        assert!(
+            await_installer_window(&mut delayed, &ready, Duration::from_secs(8), &op)
+                .expect("ready")
+        );
+        assert!(started.elapsed() >= Duration::from_millis(200));
+        delayed.wait().expect("exit");
+        std::fs::remove_file(&ready).expect("remove marker");
+        let mut exited = child("exit 7", &ready);
+        assert_eq!(
+            await_installer_window(&mut exited, &ready, Duration::from_secs(8), &op)
+                .expect_err("early exit")
+                .code,
+            "UPDATE_INSTALLER_EARLY_EXIT"
+        );
+        let mut stalled = child("Start-Sleep -Seconds 2", &ready);
+        assert!(
+            !await_installer_window(&mut stalled, &ready, Duration::from_millis(100), &op)
+                .expect("timeout")
+        );
+        assert!(
+            stalled.try_wait().expect("query").is_none(),
+            "timeout must not kill an active installer"
+        );
+        stalled.kill().expect("fixture cleanup");
+        stalled.wait().expect("fixture reaped");
+    }
+    #[test]
+    fn update_progress_keeps_epoch_and_version_without_install_success_claim() {
+        let (sender, mut receiver) = broadcast::channel(8);
+        let p = UpdateProgress {
+            sender: Some(sender),
+            epoch: 42,
+            version: "9.0.0".into(),
+        };
+        p.publish("waiting for installer window", json!({"timeoutMs":15000}));
+        let n = receiver.try_recv().expect("notification");
+        assert_eq!(n.lifecycle_epoch, 42);
+        assert_eq!(n.payload["params"]["latestVersion"], "9.0.0");
+        assert_eq!(n.payload["method"], "explorer.update.progress");
+        assert!(n.payload["params"]["installationComplete"].is_null());
     }
 }

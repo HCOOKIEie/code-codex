@@ -11,6 +11,7 @@ const MESSAGE_EVENT = "code-codex:message";
 import { connectRuntimeInformation } from "./runtime-information";
 import { runtimeEvent } from "./runtime-events";
 import { runtimeErrorDetails } from "./runtime-operations";
+import { reconnectRendererStorage } from './renderer-storage';
 
 function safeRuntimeName(value: string | undefined, fallback: string): string {
   return typeof value === "string" && /^__[A-Za-z][A-Za-z0-9_]{1,94}$/.test(value)
@@ -33,6 +34,7 @@ function consumeBootstrap(): Readonly<BootstrapConfig> {
         ...(typeof source.forceDrawer === "boolean" ? { forceDrawer: source.forceDrawer } : {}),
         ...(typeof source.manualWorkspace === "boolean" ? { manualWorkspace: source.manualWorkspace } : {}),
         ...(typeof source.startupSplashActive === "boolean" ? { startupSplashActive: source.startupSplashActive } : {}),
+        ...(typeof source.centralizedStorage === "boolean" ? { centralizedStorage: source.centralizedStorage } : {}),
       }
     : {};
 
@@ -147,6 +149,7 @@ export class ExplorerBridge extends EventTarget {
       if (typeof unsubscribe === "function") this.#unsubscribeObjectBridge = unsubscribe;
     }
     connectRuntimeInformation(this.request.bind(this));
+    if (bootstrap.centralizedStorage) reconnectRendererStorage(this.request.bind(this));
   }
 
   get available(): boolean {

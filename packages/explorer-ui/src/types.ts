@@ -104,6 +104,7 @@ export interface BootstrapConfig {
   forceDrawer?: boolean;
   manualWorkspace?: boolean;
   startupSplashActive?: boolean;
+  centralizedStorage?: boolean;
 }
 
 export interface ObjectBridge {

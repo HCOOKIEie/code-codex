@@ -65,6 +65,73 @@ fn websocket_allowed(url: &Url, endpoint: CdpEndpoint) -> bool {
         && url.fragment().is_none()
 }
 
+async fn restore_native_media(
+    socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+    id: &mut u64,
+    scope: &str,
+    db_name: &str,
+    store: &str,
+) -> Result<(), String> {
+    let listed = crate::renderer_storage::request(json!({"action":"media.list","scope":scope}))
+        .map_err(|e| e.to_string())?;
+    for doc in listed.as_array().into_iter().flatten() {
+        let record_id = doc["id"]
+            .as_str()
+            .ok_or("Native media identifier unavailable")?;
+        let db = serde_json::to_string(db_name).map_err(|e| e.to_string())?;
+        let store_js = serde_json::to_string(store).map_err(|e| e.to_string())?;
+        let record_js = doc["record"].to_string();
+        let item_js = doc["record"]["id"].to_string();
+        let open = format!(
+            "new Promise((resolve,reject)=>{{const r=indexedDB.open({db},1);r.onupgradeneeded=()=>{{if(!r.result.objectStoreNames.contains({store_js}))r.result.createObjectStore({store_js},{{keyPath:'id'}})}};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)}})"
+        );
+        let expression = format!(
+            "(async()=>{{const db=await {open};try{{return await new Promise((resolve,reject)=>{{const r=db.transaction({store_js}).objectStore({store_js}).get({item_js});r.onsuccess=()=>resolve(!!(r.result?.blob||r.result?.file));r.onerror=()=>reject(r.error)}})}}finally{{db.close()}}}})()"
+        );
+        let value = command(
+            socket,
+            id,
+            "Runtime.evaluate",
+            json!({"expression":expression,"awaitPromise":true,"returnByValue":true}),
+        )
+        .await?;
+        if value.pointer("/result/value").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        let key = "code-codex:native-startup-restore:v1";
+        let work=async {
+            command(socket,id,"Runtime.evaluate",json!({"expression":format!("window[Symbol.for('{key}')]=Object.create(null)"),"returnByValue":true})).await?;
+            let mut bytes=0u64;
+            for (field,descriptor) in doc["blobs"].as_object().ok_or("Missing media descriptors")? {
+                let size=descriptor["size"].as_u64().ok_or("Native media size unavailable")?;
+                let f=serde_json::to_string(field).map_err(|e|e.to_string())?;
+                command(socket,id,"Runtime.evaluate",json!({"expression":format!("window[Symbol.for('{key}')][{f}]=[]"),"returnByValue":true})).await?;
+                let mut offset=0;
+                while offset<size {
+                    let chunk=crate::renderer_storage::request(json!({"action":"media.read","scope":scope,"id":record_id,"field":field,"offset":offset})).map_err(|e|e.to_string())?;
+                    let data=chunk["data"].as_str().ok_or("Native media chunk unavailable")?;
+                    use base64::Engine as _;
+                    let length=base64::engine::general_purpose::STANDARD.decode(data).map_err(|e|e.to_string())?.len();
+                    if length==0{return Err("Empty native media chunk".to_owned());}
+                    let encoded=serde_json::to_string(data).map_err(|e|e.to_string())?;
+                    command(socket,id,"Runtime.evaluate",json!({"expression":format!("window[Symbol.for('{key}')][{f}].push(Uint8Array.from(atob({encoded}),c=>c.charCodeAt(0)))"),"returnByValue":true})).await?;
+                    offset+=length as u64;
+                }
+                bytes+=size;
+            }
+            let descriptors=doc["blobs"].to_string();
+            let expression=format!("(async()=>{{const chunks=window[Symbol.for('{key}')],record={record_js},descriptors={descriptors};for(const [field,d] of Object.entries(descriptors)){{const blob=new Blob(chunks[field],{{type:d.type}});const digest=[...new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()))].map(b=>b.toString(16).padStart(2,'0')).join('');if(blob.size!==d.size||digest!==d.sha256)throw Error('Native media failed integrity verification');record[field]=d.name?new File([blob],d.name,{{type:d.type,lastModified:d.lastModified||0}}):blob;}}const db=await {open};try{{await new Promise((resolve,reject)=>{{const tx=db.transaction({store_js},'readwrite');tx.objectStore({store_js}).put(record);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)}})}}finally{{db.close()}}return true}})()");
+            let value=command(socket,id,"Runtime.evaluate",json!({"expression":expression,"awaitPromise":true,"returnByValue":true})).await?;
+            if value.pointer("/result/value").and_then(Value::as_bool)!=Some(true){return Err("Native media restoration did not complete".to_owned());}
+            event("native startup media","restored",json!({"scope":scope,"bytes":bytes,"integrityVerified":true,"networkRequested":false}));
+            Ok(())
+        }.await;
+        let _=command(socket,id,"Runtime.evaluate",json!({"expression":format!("delete window[Symbol.for('{key}')]"),"returnByValue":true})).await;
+        work?;
+    }
+    Ok(())
+}
+
 async fn supervise(
     endpoint: CdpEndpoint,
     pid: u32,
@@ -196,6 +263,35 @@ async fn session(
     // The core carries only the entry hook. Both video and background playback
     // require the independently downloaded, hash-verified startup package.
     // Never download or wait for a network request while Codex is launching.
+    match crate::renderer_storage::settings_snapshot() {
+        Ok(values) => {
+            if values.is_object() && values.as_object().is_some_and(|m| !m.is_empty()) {
+                let expression = format!(
+                    "(()=>{{const values={values};let restored=0,preserved=0;for(const [key,value] of Object.entries(values)){{if(key.startsWith('code-codex:')&&!key.includes('lease')&&typeof value==='string'){{if(localStorage.getItem(key)!==null){{preserved++;continue;}}localStorage.setItem(key,value);restored++;}}}}return {{restored,preserved,existingBrowserValuesWin:true}};}})()"
+                );
+                let result = command(
+                    &mut socket,
+                    &mut id,
+                    "Runtime.evaluate",
+                    json!({"expression":expression,"returnByValue":true}),
+                )
+                .await?;
+                event(
+                    "early native preferences",
+                    "restored",
+                    result
+                        .pointer("/result/value")
+                        .cloned()
+                        .unwrap_or(json!({"result":"unavailable"})),
+                );
+            }
+        }
+        Err(e) => event(
+            "early native preferences",
+            "failed",
+            json!({"reason":e.to_string(),"ioKind":format!("{:?}",e.kind()),"osErrorCode":e.raw_os_error(),"browserValuesPreserved":true}),
+        ),
+    }
     let selected = command(&mut socket, &mut id, "Runtime.evaluate", json!({
         "expression":"(()=>{try{const s=JSON.parse(localStorage.getItem('code-codex:startup-transition:v1')||'null');return {enabled:s?.enabled===true,backgroundId:s?.enabled&&s.source==='background'?s.backgroundId:''}}catch{return {enabled:false,backgroundId:''}}})()",
         "returnByValue":true
@@ -210,6 +306,28 @@ async fn session(
         .unwrap_or("");
     let mut sources = Vec::new();
     if enabled {
+        // A cleared browser cache must not silently lose a user-selected startup video.
+        let media = match background_id {
+            "particle-image" => Some((
+                "particle-image",
+                "code-codex-particle-image-background",
+                "images",
+            )),
+            "pixel-sculpt" => Some(("pixel-sculpt", "code-codex-pixel-sculpt", "images")),
+            "" => Some(("startup", "code-codex-startup-transition", "video")),
+            _ => None,
+        };
+        if let Some((scope, db, store)) = media {
+            if let Err(reason) = restore_native_media(&mut socket, &mut id, scope, db, store).await
+            {
+                event(
+                    "native startup media",
+                    "unavailable",
+                    json!({"reason":reason,"normalStartupUnaffected":true}),
+                );
+            }
+        }
+
         match crate::plugin_store::sources("codex-startup-transition") {
             Ok(startup) => {
                 let background = if background_id.is_empty() {

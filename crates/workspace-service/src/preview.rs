@@ -1645,9 +1645,11 @@ fn render_native_powerpoint_bundle(
             "the PowerPoint source size is outside the native preview limits".to_owned(),
         ));
     }
+    let temporary_root = crate::application_paths::temp_root()
+        .map_err(|error| format!("the preview storage location is unavailable: {error}"))?;
     let temporary = tempfile::Builder::new()
         .prefix("CodeCodex-PowerPoint-")
-        .tempdir()
+        .tempdir_in(temporary_root)
         .map_err(|error| format!("a PowerPoint preview directory could not be created: {error}"))?;
     let source_path = temporary.path().join("source.ppt");
     let output_path = temporary.path().join("slides");

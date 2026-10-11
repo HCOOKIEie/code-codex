@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.4.4",
+    [string]$Version = "0.4.17",
     [string]$BinaryPath,
     [string]$GuiBinaryPath,
     [string]$ShimBinaryPath,
@@ -163,6 +163,8 @@ if (-not $customActionBuildItem.PSIsContainer -or
 try {
     $currentVersionPath = Join-Path $customActionBuildRoot "current-version"
     $installTypePath = Join-Path $customActionBuildRoot "install-type"
+    $storageLayoutPath = Join-Path $customActionBuildRoot "storage-layout.json"
+    [IO.File]::WriteAllText($storageLayoutPath,'{"schema":1,"product":"Code-Codex","layout":"centralized"}',[Text.UTF8Encoding]::new($false))
     $commandLineComponentGuid = Get-DeterministicComponentGuid "CodeCodex|CommandLinePayload|$Version"
     $runtimeLauncherComponentGuid = Get-DeterministicComponentGuid "CodeCodex|RuntimeLauncherPayload|$Version"
     [IO.File]::WriteAllText($currentVersionPath, $Version + "`n", [Text.UTF8Encoding]::new($false))
@@ -209,6 +211,7 @@ try {
         "-d", "BrandIconPath=$brandIconPath",
         "-d", "CurrentVersionPath=$currentVersionPath",
         "-d", "InstallTypePath=$installTypePath",
+        "-d", "StorageLayoutPath=$storageLayoutPath",
         "-d", "CommandLineComponentGuid=$commandLineComponentGuid",
         "-d", "RuntimeLauncherComponentGuid=$runtimeLauncherComponentGuid",
         "-d", "ReadmePath=$readmePath",

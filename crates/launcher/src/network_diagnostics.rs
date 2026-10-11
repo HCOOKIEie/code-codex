@@ -16,7 +16,35 @@ pub(crate) fn error_details(error: &(dyn Error + 'static)) -> Value {
         chain.push(cause.to_string());
         source = cause.source();
     }
-    json!({"errorChain":chain,"chainTruncated":source.is_some()})
+    let mut current = Some(error);
+    let mut native = vec![];
+    for _ in 0..8 {
+        let Some(cause) = current else { break };
+        if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+            native.push(json!({"kind":format!("{:?}",io.kind()),"osCode":io.raw_os_error()}));
+        }
+        current = cause.source();
+    }
+    json!({"errorChain":chain,"chainTruncated":source.is_some(),"nativeErrors":native})
+}
+
+fn transient_transport(error: &(dyn Error + 'static)) -> bool {
+    let mut current = Some(error);
+    for _ in 0..8 {
+        let Some(cause) = current else { break };
+        if let Some(error) = cause.downcast_ref::<std::io::Error>() {
+            return matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionRefused
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::Interrupted
+                    | std::io::ErrorKind::NotConnected
+            );
+        }
+        current = cause.source();
+    }
+    false
 }
 
 pub(crate) fn error_message(error: &(dyn Error + 'static)) -> String {
@@ -85,6 +113,7 @@ fn windows_proxy() -> Value {
 pub(crate) struct HttpTrace {
     pub(crate) operation: Operation,
     host: String,
+    port: u16,
 }
 impl HttpTrace {
     pub(crate) fn start(
@@ -108,33 +137,114 @@ impl HttpTrace {
         Self {
             operation: Operation::start(source, "HTTP request", details),
             host,
+            port: url::Url::parse(endpoint)
+                .ok()
+                .and_then(|u| u.port_or_known_default())
+                .unwrap_or(443),
         }
     }
     pub(crate) async fn send(
         &mut self,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, reqwest::Error> {
-        match request.send().await {
+        let retry = request.try_clone().filter(|clone| {
+            clone
+                .try_clone()
+                .and_then(|r| r.build().ok())
+                .is_some_and(|r| {
+                    matches!(*r.method(), reqwest::Method::GET | reqwest::Method::HEAD)
+                })
+        });
+        let mut result = request.send().await;
+        if let Err(error) = &result {
+            let eligible = retry.is_some() && transient_transport(error) && !error.is_timeout();
+            if eligible {
+                let mut first = error_details(error);
+                first["connect"] = json!(error.is_connect());
+                first["timeout"] = json!(error.is_timeout());
+                first["attempt"] = json!(1);
+                first["recoveryPlanned"] =
+                    json!("One retry of the same GET/HEAD before response headers");
+                self.operation.event("HTTP attempt", "failed", first);
+                self.operation.event(
+                    "HTTP read retry",
+                    "started",
+                    json!({"attempt":2,"delayMs":250,"maxAttempts":2,"writeReplayed":false}),
+                );
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                result = retry.expect("eligible cloned read request").send().await;
+                self.operation.event("HTTP read retry",if result.is_ok(){"recovered"}else{"failed"},json!({"attempt":2,"meaning":"Recovered transport only; HTTP status, body and integrity checks still required."}));
+            } else {
+                self.operation.event("HTTP retry decision","not eligible",json!({"safeReadClone":retry.is_some(),"transientOsError":transient_transport(error),"timeout":error.is_timeout(),"reason":"Only explicitly transient native connection errors on GET/HEAD before headers qualify; no write, timeout, TLS-policy or HTTP-status retries."}));
+            }
+        }
+        match result {
             Ok(response) => {
                 self.operation.event("HTTP headers","received",json!({"status":response.status().as_u16(),"finalHost":response.url().host_str(),"contentLength":response.content_length(),"contentType":response.headers().get("content-type").and_then(|v|v.to_str().ok()),"retryAfter":response.headers().get("retry-after").and_then(|v|v.to_str().ok()),"rateLimitRemaining":response.headers().get("x-ratelimit-remaining").and_then(|v|v.to_str().ok())}));
                 Ok(response)
             }
             Err(error) => {
                 self.fail("send", &error, 0);
-                // Separate bounded probe after failure, never mistaken for request DNS/proxy behavior.
-                let started = Instant::now();
-                let result = tokio::time::timeout(
-                    Duration::from_millis(800),
-                    tokio::net::lookup_host((self.host.as_str(), 443)),
-                )
-                .await;
-                let observation = match result {
-                    Ok(Ok(addresses)) => json!({"resolvedAddressCount":addresses.count()}),
+                self.probe_route().await;
+                Err(error)
+            }
+        }
+    }
+    async fn probe_route(&self) {
+        static LAST: std::sync::OnceLock<
+            std::sync::Mutex<std::collections::HashMap<String, Instant>>,
+        > = std::sync::OnceLock::new();
+        let probe_key = format!("{}:{}", self.host, self.port);
+        let allowed = LAST
+            .get_or_init(Default::default)
+            .lock()
+            .is_ok_and(|mut entries| {
+                entries.retain(|_, at| at.elapsed() < Duration::from_secs(30));
+                if entries.contains_key(&probe_key) || entries.len() >= 8 {
+                    false
+                } else {
+                    entries.insert(probe_key.clone(), Instant::now());
+                    true
+                }
+            });
+        if !allowed {
+            self.operation.event("post-failure network checks","skipped",json!({"reason":"host check rate limit or diagnostic lock unavailable","intervalMs":30000,"originalFailurePreserved":true}));
+            return;
+        }
+        let started = Instant::now();
+        let result = tokio::time::timeout(
+            Duration::from_millis(800),
+            tokio::net::lookup_host((self.host.as_str(), self.port)),
+        )
+        .await;
+        match result {
+            Ok(Ok(addresses)) => {
+                let addresses: Vec<_> = addresses.collect();
+                self.operation.event("post-failure DNS probe","observed",json!({"host":self.host,"probeDurationMs":started.elapsed().as_millis(),"probe":{"resolvedAddressCount":addresses.len()},"interpretation":"Separate local resolver; not original request DNS or proxy route."}));
+                for (index, address) in addresses.into_iter().take(2).enumerate() {
+                    let started = Instant::now();
+                    let result = tokio::time::timeout(
+                        Duration::from_millis(500),
+                        tokio::net::TcpStream::connect(address),
+                    )
+                    .await;
+                    let outcome = match result {
+                        Ok(Ok(_)) => json!({"connected":true}),
+                        Ok(Err(error)) => {
+                            json!({"connected":false,"kind":format!("{:?}",error.kind()),"osCode":error.raw_os_error(),"errorChain":error_details(&error)["errorChain"]})
+                        }
+                        Err(_) => json!({"connected":false,"timeoutMs":500}),
+                    };
+                    self.operation.event("post-failure TCP probe","observed",json!({"candidate":index+1,"addressFamily":if address.is_ipv4(){"IPv4"}else{"IPv6"},"durationMs":started.elapsed().as_millis(),"probe":outcome,"tlsChecked":false,"interpretation":"Direct independent TCP connection, bypassing HTTP proxy; not proof about the original request."}));
+                }
+            }
+            other => {
+                let probe = match other {
                     Ok(Err(e)) => error_details(&e),
                     Err(_) => json!({"probeTimeoutMs":800}),
+                    _ => unreachable!(),
                 };
-                self.operation.event("post-failure DNS probe","observed",json!({"host":self.host,"probeDurationMs":started.elapsed().as_millis(),"probe":observation,"interpretation":"Separate local DNS observation; not the failed request resolver or proxy route."}));
-                Err(error)
+                self.operation.event("post-failure DNS probe","observed",json!({"host":self.host,"probeDurationMs":started.elapsed().as_millis(),"probe":probe,"TCP":"skipped because DNS yielded no addresses","interpretation":"Independent resolver observation only."}));
             }
         }
     }
@@ -209,6 +319,54 @@ mod tests {
                 .any(|e| e["action"] == "post-failure DNS probe")
         );
         assert!(error_message(&error).contains("caused by"));
+    }
+    #[test]
+    fn transient_native_connection_classification_excludes_policy_and_permission_errors() {
+        for kind in [
+            std::io::ErrorKind::ConnectionRefused,
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::ConnectionAborted,
+        ] {
+            assert!(transient_transport(&std::io::Error::from(kind)));
+        }
+        for kind in [
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::InvalidData,
+            std::io::ErrorKind::TimedOut,
+        ] {
+            assert!(!transient_transport(&std::io::Error::from(kind)));
+        }
+    }
+    #[tokio::test]
+    async fn timeout_and_post_requests_are_not_replayed() {
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .connect_timeout(Duration::from_millis(80))
+            .timeout(Duration::from_millis(80))
+            .build()
+            .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        // Listening without reading/responding deterministically times out after transport connects.
+        let endpoint = format!("http://{address}");
+        for request in [client.get(&endpoint), client.post(&endpoint)] {
+            crate::runtime_log::capture_test_events();
+            let mut trace = HttpTrace::start("test", &endpoint, 80, 80, json!({}));
+            let error = trace.send(request).await.unwrap_err();
+            assert!(error.is_timeout());
+            let events = crate::runtime_log::take_test_events();
+            assert!(
+                !events
+                    .iter()
+                    .any(|event| event["action"] == "HTTP read retry")
+            );
+            assert!(
+                events.iter().any(
+                    |event| event["outcome"] == "failed" && event["details"]["timeout"] == true
+                )
+            );
+        }
+        drop(listener);
     }
     #[tokio::test]
     async fn headers_and_mid_body_failure_are_distinguished() {

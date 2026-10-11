@@ -105,10 +105,10 @@ impl PreparedSettings {
             temporary,
             destination,
         } = self;
-        temporary
-            .persist(destination)
-            .map(drop)
-            .map_err(|_| WorkspaceError::AccessDenied)
+        temporary.persist(destination).map(drop).map_err(|error| {
+            crate::error::observe_io("settings commit", &error.error);
+            WorkspaceError::AccessDenied
+        })
     }
 }
 
@@ -116,9 +116,10 @@ impl SettingsStore {
     pub fn for_current_user() -> Result<Self, WorkspaceError> {
         #[cfg(windows)]
         {
-            let local = std::env::var_os("LOCALAPPDATA").ok_or(WorkspaceError::Internal)?;
             Ok(Self::new(
-                PathBuf::from(local).join("CodeCodex").join("settings.json"),
+                crate::application_paths::data_root()
+                    .map_err(|_| WorkspaceError::Internal)?
+                    .join("settings.json"),
             ))
         }
         #[cfg(not(windows))]
@@ -146,13 +147,17 @@ impl SettingsStore {
                 return Ok(Settings::default());
             }
             Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                crate::error::observe_io("settings read", &error);
                 return Err(WorkspaceError::AccessDenied);
             }
-            Err(_) => return Err(WorkspaceError::Internal),
+            Err(error) => {
+                crate::error::observe_io("settings read", &error);
+                return Err(WorkspaceError::Internal);
+            }
         };
         let settings: Settings =
-            serde_json::from_slice(&bytes).map_err(|_| WorkspaceError::InvalidSettings)?;
-        settings.validate()?;
+            serde_json::from_slice(&bytes).map_err(|error| {crate::error::observe("settings parse",serde_json::json!({"code":"INVALID_SETTINGS","category":format!("{:?}",error.classify()),"line":error.line(),"column":error.column(),"bytes":bytes.len(),"valuesOmitted":true}));WorkspaceError::InvalidSettings})?;
+        settings.validate().inspect_err(|_|crate::error::observe("settings validation",serde_json::json!({"code":"INVALID_SETTINGS","constraint":"panel width range","min":MIN_PANEL_WIDTH,"max":MAX_PANEL_WIDTH})))?;
         Ok(settings)
     }
 
@@ -163,22 +168,30 @@ impl SettingsStore {
     /// Writes and flushes a candidate file without changing `settings.json`.
     /// The caller can perform any final authorization checks before commit.
     pub fn prepare(&self, settings: &Settings) -> Result<PreparedSettings, WorkspaceError> {
-        settings.validate()?;
+        settings.validate().inspect_err(|_|crate::error::observe("settings validation",serde_json::json!({"code":"INVALID_SETTINGS","constraint":"panel width range","min":MIN_PANEL_WIDTH,"max":MAX_PANEL_WIDTH})))?;
         let parent = self.path.parent().ok_or(WorkspaceError::Internal)?;
-        std::fs::create_dir_all(parent).map_err(|_| WorkspaceError::AccessDenied)?;
+        std::fs::create_dir_all(parent).map_err(|error| {
+            crate::error::observe_io("settings parent directory", &error);
+            WorkspaceError::AccessDenied
+        })?;
         let mut temporary = tempfile::Builder::new()
             .prefix(SETTINGS_CANDIDATE_PREFIX)
             .rand_bytes(SETTINGS_CANDIDATE_TOKEN_LENGTH)
             .suffix(SETTINGS_CANDIDATE_SUFFIX)
             .tempfile_in(parent)
-            .map_err(|_| WorkspaceError::AccessDenied)?;
+            .map_err(|error| {
+                crate::error::observe_io("settings candidate create", &error);
+                WorkspaceError::AccessDenied
+            })?;
         let bytes = serde_json::to_vec_pretty(settings).map_err(|_| WorkspaceError::Internal)?;
-        std::io::Write::write_all(temporary.as_file_mut(), &bytes)
-            .map_err(|_| WorkspaceError::AccessDenied)?;
-        temporary
-            .as_file()
-            .sync_all()
-            .map_err(|_| WorkspaceError::AccessDenied)?;
+        std::io::Write::write_all(temporary.as_file_mut(), &bytes).map_err(|error| {
+            crate::error::observe_io("settings candidate write", &error);
+            WorkspaceError::AccessDenied
+        })?;
+        temporary.as_file().sync_all().map_err(|error| {
+            crate::error::observe_io("settings candidate flush", &error);
+            WorkspaceError::AccessDenied
+        })?;
         Ok(PreparedSettings {
             temporary,
             destination: self.path.clone(),

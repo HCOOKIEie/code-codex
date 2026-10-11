@@ -47,6 +47,9 @@
       Execute="rollback"
       Impersonate="yes"
       Return="ignore" />
+    <CustomAction Id="InitializeCentralStorage" FileRef="ShortcutIntegrationExecutable"
+      ExeCommand="initialize-storage --install-root &quot;[INSTALLFOLDER].&quot;"
+      Execute="deferred" Impersonate="yes" Return="check" />
     <CustomAction
       Id="PrepareCodexShortcutInstall"
       FileRef="ShortcutIntegrationExecutable"
@@ -91,13 +94,14 @@
       Return="asyncNoWait" />
 
     <InstallExecuteSequence>
+      <Custom Action="InitializeCentralStorage" After="InstallFiles" Condition="NOT (REMOVE = &quot;ALL&quot;)" />
       <Custom
         Action="BlockCrossFormatInstall"
         Before="InstallInitialize"
         Condition="NOT (REMOVE = &quot;ALL&quot;)" />
       <Custom
         Action="RollbackCodexShortcutInstall"
-        After="InstallFiles"
+        After="InitializeCentralStorage"
         Condition="NOT Installed AND NOT (REMOVE = &quot;ALL&quot;)" />
       <Custom
         Action="PrepareCodexShortcutInstall"
@@ -129,6 +133,8 @@
         Condition="REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
 
+    <Property Id="REGISTEREDINSTALLFOLDER"><RegistrySearch Id="CurrentStorageRoot" Root="HKCU" Key="Software\CodeCodex" Name="InstallPath" Type="raw" /></Property>
+    <SetProperty Id="INSTALLFOLDER" Value="[REGISTEREDINSTALLFOLDER]" Before="CostInitialize" Condition="REGISTEREDINSTALLFOLDER AND NOT INSTALLFOLDER" />
     <Property Id="ARPNOMODIFY" Value="1" />
     <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
     <SetProperty
@@ -149,6 +155,7 @@
 
     <Feature Id="Complete" Title="Code-Codex" Level="1">
       <ComponentRef Id="ProductFiles" />
+      <ComponentRef Id="StorageLayoutMarker" />
       <ComponentRef Id="CommandLinePayload" />
       <ComponentRef Id="RuntimeLauncherPayload" />
       <ComponentRef Id="SettingsCleanup" />
@@ -157,6 +164,10 @@
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="LocalProgramsFolder" Name="Programs">
         <Directory Id="INSTALLFOLDER" Name="Code-Codex">
+          <Component Id="StorageLayoutMarker" Guid="{F59A9C8C-C10C-46DB-A5D9-FF8D94C9E710}" Permanent="yes">
+            <File Id="StorageLayoutFile" Source="$(var.StorageLayoutPath)" Name="storage-layout.json" />
+            <RegistryValue Root="HKCU" Key="Software\CodeCodex\Storage" Name="Schema" Type="integer" Value="1" KeyPath="yes" />
+          </Component>
           <Component Id="ProductFiles" Guid="{F44B8D83-89A2-4BE9-AAD9-5C8EE69496D8}">
             <File
               Id="RootLauncherExecutable"
@@ -209,11 +220,6 @@
               Type="string"
               Value="[INSTALLFOLDER]"
               KeyPath="yes" />
-            <RemoveRegistryKey
-              Id="RemoveProductRegistryKey"
-              Root="HKCU"
-              Key="Software\CodeCodex"
-              Action="removeOnUninstall" />
             <RemoveFile
               Id="RemoveGeneratedCodexIcon"
               Name="Codex.ico"
@@ -269,7 +275,6 @@
       </Directory>
       <Directory Id="SettingsFolder" Name="CodeCodex">
         <Component Id="SettingsCleanup" Guid="{E19D3378-5F12-4F11-A85A-8AC4318F831B}">
-          <CreateFolder />
           <RemoveFolder Id="RemoveSettingsFolder" Directory="SettingsFolder" On="uninstall" />
           <RegistryValue
             Root="HKCU"

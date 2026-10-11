@@ -84,11 +84,14 @@ struct RunLog {
     bytes: usize,
     dirty: bool,
     storage_error: Option<String>,
+    failure_total: u64,
+    failure_counts: std::collections::BTreeMap<String, u64>,
+    oversized_events: u64,
 }
 
 impl RunLog {
     fn document(&self) -> String {
-        let header = json!({"schema":1,"runId":self.id,"version":env!("CARGO_PKG_VERSION"),"startedAt":self.started_at,"droppedEvents":self.dropped,"maxBytes":MAX_BYTES,"redactionPolicy":1});
+        let header = json!({"schema":1,"runId":self.id,"version":env!("CARGO_PKG_VERSION"),"startedAt":self.started_at,"droppedEvents":self.dropped,"maxBytes":MAX_BYTES,"redactionPolicy":1,"faultSchema":1,"failureTotal":self.failure_total,"failureCounts":self.failure_counts,"oversizedEvents":self.oversized_events,"failureSummaryScope":"entire run including trimmed events; detailed events are retained only within limits"});
         format!(
             "{}\n{}",
             header,
@@ -97,9 +100,61 @@ impl RunLog {
     }
     fn push(&mut self, source: &str, action: &str, outcome: &str, details: Value) {
         self.sequence += 1;
+        let mut details = redaction::value(crate::fault_diagnostics::enrich(
+            source, action, outcome, details,
+        ));
+        if crate::fault_diagnostics::is_failure(outcome) {
+            self.failure_total += 1;
+            let group = format!(
+                "{}:{}",
+                details["fault"]["domain"].as_str().unwrap_or("other"),
+                details["fault"]["classification"]
+                    .as_str()
+                    .unwrap_or("unclassified")
+            );
+            *self.failure_counts.entry(group).or_default() += 1;
+        }
+        let original_bytes = details.to_string().len();
+        if original_bytes > 28 * 1024 {
+            self.oversized_events += 1;
+            // Retain the failed step and its most useful evidence instead of dropping the whole event.
+            let mut compact = json!({"detailsOmitted":true,"originalDetailBytes":original_bytes});
+            for key in [
+                "fault",
+                "operationId",
+                "requestRef",
+                "durationMs",
+                "errorCode",
+                "code",
+                "reason",
+                "message",
+                "errorChain",
+                "ioKind",
+                "osErrorCode",
+                "osCode",
+                "attempt",
+                "phase",
+                "observedAt",
+            ] {
+                if let Some(value) = details.get(key) {
+                    compact[key] = match value {
+                        Value::String(value) => json!(value.chars().take(2000).collect::<String>()),
+                        Value::Array(values) => json!(
+                            values
+                                .iter()
+                                .take(4)
+                                .map(|v| v.to_string().chars().take(1000).collect::<String>())
+                                .collect::<Vec<_>>()
+                        ),
+                        _ => value.clone(),
+                    };
+                }
+            }
+            details = compact;
+        }
         let line = format!(
             "{}\n",
-            json!({"sequence":self.sequence,"time":now(),"elapsedMs":self.started.elapsed().as_millis(),"source":redaction::text(source),"action":redaction::text(action),"outcome":redaction::text(outcome),"details":redaction::value(details)})
+            json!({"sequence":self.sequence,"time":now(),"elapsedMs":self.started.elapsed().as_millis(),"source":redaction::text(source),"action":redaction::text(action),"outcome":redaction::text(outcome),"details":details})
         );
         // Reserve more than the maximum metadata header, retain complete UTF-8 events.
         if line.len() > 32 * 1024 {
@@ -109,7 +164,7 @@ impl RunLog {
         }
         self.bytes += line.len();
         self.events.push_back(line);
-        if self.bytes > MAX_BYTES - 1024 {
+        if self.bytes > MAX_BYTES - 16 * 1024 {
             // Remove an oldest batch, avoiding rewriting the entire file on every new event.
             while self.bytes > MAX_BYTES * 4 / 5 {
                 if let Some(old) = self.events.pop_front() {
@@ -209,10 +264,10 @@ fn trim_runs(directory: &std::path::Path, current: &str) -> io::Result<()> {
 }
 
 pub fn begin(mode: &str) {
-    let directory = std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("CodeCodex/runtime-logs");
+    let location = workspace_service::application_paths::log_root("runtime");
+    let location_error = location.as_ref().err().map(ToString::to_string);
+    let directory =
+        location.unwrap_or_else(|_| std::env::temp_dir().join("CodeCodex-emergency-runtime"));
     let started_at = now();
     let log = RunLog {
         directory,
@@ -224,14 +279,47 @@ pub fn begin(mode: &str) {
         events: VecDeque::new(),
         bytes: 0,
         dirty: true,
-        storage_error: None,
+        storage_error: location_error,
+        failure_total: 0,
+        failure_counts: Default::default(),
+        oversized_events: 0,
     };
     if LOG.set(Mutex::new(log)).is_err() {
         return;
     }
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("Non-string panic payload");
+        record(
+            "launcher",
+            "panic",
+            "failed",
+            json!({"reason":message,"line":info.location().map(|l|l.line()),"column":info.location().map(|l|l.column()),"unwindOutcome":"not known","externalCrashDump":"not captured"}),
+        );
+        flush();
+        previous_hook(info);
+    }));
+    cdp_client::set_diagnostic_observer(record);
     workspace_service::set_diagnostic_observer(record);
     context_resolver::set_diagnostic_observer(record);
     record("launcher", "session", "started", json!({"mode":mode}));
+    record(
+        "storage",
+        "location contract",
+        "observed",
+        json!({"centralized":workspace_service::application_paths::install_root().ok().flatten().is_some(),"layoutSchema":1,"runRetention":10,"maxRunBytes":MAX_BYTES,"settings":"data/settings.json","plugins":"plugins/<category>/<id>/<version>","runtimeLogs":"logs/runtime","diagnostics":"logs/diagnostics","legacyCopyRetained":true}),
+    );
+    record(
+        "diagnostics",
+        "environment",
+        "observed",
+        crate::support_checks::environment(),
+    );
     flush();
     let _ = std::thread::Builder::new()
         .name("runtime-log-writer".into())
@@ -296,7 +384,15 @@ pub fn list() -> Result<Value, String> {
         .ok_or("Runtime logging has not started")?
         .lock()
         .map_err(|_| "Runtime log lock failed")?;
-    let files = run_files(&log.directory).unwrap_or_default();
+    let (files, directory_error) = match run_files(&log.directory) {
+        Ok(files) => (files, None),
+        Err(error) => (
+            Vec::new(),
+            Some(
+                json!({"kind":format!("{:?}",error.kind()),"osCode":error.raw_os_error(),"reason":redaction::text(&error.to_string())}),
+            ),
+        ),
+    };
     let mut runs: Vec<Value> = files
         .into_iter()
         .take(KEEP_RUNS)
@@ -313,7 +409,7 @@ pub fn list() -> Result<Value, String> {
         runs.truncate(KEEP_RUNS);
     }
     Ok(
-        json!({"runs":runs,"currentRun":log.id,"storageError":log.storage_error,"maxBytes":MAX_BYTES,"keepRuns":KEEP_RUNS}),
+        json!({"runs":runs,"currentRun":log.id,"storageError":log.storage_error,"maxBytes":MAX_BYTES,"keepRuns":KEEP_RUNS,"directoryError":directory_error}),
     )
 }
 pub fn read(id: &str) -> Result<Value, String> {
@@ -374,6 +470,9 @@ mod tests {
             bytes: 0,
             dirty: true,
             storage_error: None,
+            failure_total: 0,
+            failure_counts: Default::default(),
+            oversized_events: 0,
         }
     }
     #[test]
@@ -396,6 +495,33 @@ mod tests {
             .collect();
         assert_eq!(lines.last().unwrap()["details"]["n"], 2999);
         assert!(lines[1]["details"]["n"].as_u64().unwrap() > 0);
+    }
+    #[test]
+    fn failure_summary_survives_trimming_and_oversized_errors_keep_core_evidence() {
+        let mut log = fixture(PathBuf::new());
+        log.push("plugin","download","failed",json!({"code":"PLUGIN_NETWORK","reason":"original failure","errorChain":["transport","inner"],"extra":vec!["x".repeat(3999);100]}));
+        let document = log.document();
+        let lines: Vec<Value> = document
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(lines[0]["oversizedEvents"], 1);
+        assert_eq!(lines[1]["details"]["code"], "PLUGIN_NETWORK");
+        assert_eq!(lines[1]["details"]["detailsOmitted"], true);
+        assert_eq!(lines[1]["details"]["fault"]["classification"], "transport");
+        for i in 0..1800 {
+            log.push(
+                "test",
+                "fill",
+                "passed",
+                json!({"i":i,"large":"x".repeat(3900)}),
+            );
+        }
+        assert!(log.dropped > 0);
+        assert_eq!(log.failure_total, 1);
+        assert!(log.document().len() <= MAX_BYTES);
+        let header: Value = serde_json::from_str(log.document().lines().next().unwrap()).unwrap();
+        assert_eq!(header["failureCounts"]["plugin:transport"], 1);
     }
     #[test]
     fn persists_restarts_and_keeps_ten_runs() {

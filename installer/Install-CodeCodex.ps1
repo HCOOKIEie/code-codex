@@ -1,7 +1,205 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.4.4"
+    [string]$Version = "0.4.17",
+    [string]$InstallRoot,
+    [switch]$SelectDirectory,
+    [switch]$NoActivate
 )
+
+# storage-contract:start
+# Shared install/uninstall location contract. No recursive operation follows a reparse point.
+function Get-CodeCodexRegisteredRoot {
+    $entry = Get-ItemProperty 'HKCU:\Software\CodeCodex' -ErrorAction SilentlyContinue
+    if ($entry -and $entry.InstallPath) { return [string]$entry.InstallPath }
+    $old = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodeCodex' -ErrorAction SilentlyContinue
+    if ($old -and $old.InstallLocation) { return [string]$old.InstallLocation }
+    if ($entry -and $entry.RetainedRoot) { return [string]$entry.RetainedRoot }
+    return Join-Path $env:LOCALAPPDATA 'Programs\Code-Codex'
+}
+
+function Assert-CodeCodexRoot([string]$Root, [switch]$Owned) {
+    if ($Root -notmatch '^[A-Za-z]:[\\/]' -or $Root.Contains('"') -or $Root.Contains('..') -or $Root.Length -gt 180) {
+        throw 'Choose a bounded absolute folder on a local drive (no network, relative or device paths).'
+    }
+    $full = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    if ($full.Length -le 3 -or $full.EndsWith('.') -or $full.EndsWith(' ')) { throw 'A drive root is not an application folder.' }
+    foreach ($protected in @($env:USERPROFILE, $env:LOCALAPPDATA, $env:APPDATA, $env:WINDIR, $env:ProgramFiles, ${env:ProgramFiles(x86)}, [Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('MyDocuments'))) {
+        if ($protected -and $full.Equals([IO.Path]::GetFullPath($protected).TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { throw 'Choose a dedicated Code-Codex folder, not a system or personal folder itself.' }
+        if ($protected -and $protected -in @($env:WINDIR, $env:ProgramFiles, ${env:ProgramFiles(x86)}) -and $full.StartsWith($protected.TrimEnd('\')+'\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Choose a user-writable folder outside Windows and Program Files.' }
+    }
+    $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($full))
+    if (-not $drive.IsReady -or $drive.DriveType -ne [IO.DriveType]::Fixed) { throw 'Installation requires an available fixed local drive.' }
+    $cursor = $full
+    while ($cursor) {
+        $item = Get-Item -LiteralPath $cursor -Force -ErrorAction SilentlyContinue
+        if ($item -and (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint))) { throw "Linked or non-directory storage ancestor refused: $cursor" }
+        $cursor = Split-Path -Parent $cursor
+    }
+    if ($Owned) {
+        $marker = Join-Path $full 'storage-layout.json'
+        $item = Get-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
+        if ($item) {
+            if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -gt 4096) { throw 'Invalid or redirected storage marker; ownership refused.' }
+            $layout = [IO.File]::ReadAllText($marker) | ConvertFrom-Json
+            if ($layout.schema -eq 1 -and $layout.product -eq 'Code-Codex') { return $full }
+            throw 'Unsupported storage marker; legacy ownership fallback refused.'
+        }
+        $legacy = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs\Code-Codex'))
+        $legacyMarker = Get-Item -LiteralPath (Join-Path $full 'install-type') -Force -ErrorAction SilentlyContinue
+        if (-not $full.Equals($legacy,[StringComparison]::OrdinalIgnoreCase) -or -not $legacyMarker -or $legacyMarker.PSIsContainer -or ($legacyMarker.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Application ownership could not be verified; no files will be removed.' }
+    }
+    return $full
+}
+
+function Copy-CodeCodexDataTree([string]$Source, [string]$Destination) {
+    $item = Get-Item -LiteralPath $Source -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return }
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Redirected migration source refused: $Source" }
+    $existing = Get-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+    if ($existing -and ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw "Redirected migration destination refused: $Destination" }
+    if ($item.PSIsContainer) {
+        if ($existing -and -not $existing.PSIsContainer) { throw 'Migration destination has conflicting file type.' }
+        New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+        foreach ($child in Get-ChildItem -LiteralPath $Source -Force) {
+            Copy-CodeCodexDataTree $child.FullName (Join-Path $Destination $child.Name)
+        }
+    } else {
+        if ($existing) {
+            # Newer destination data wins. Keep the original source for recovery.
+            $script:MigrationSkipped++
+            return
+        }
+        New-Item -ItemType Directory -Path (Split-Path -Parent $Destination) -Force | Out-Null
+        $stage = $Destination + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
+        try {
+            Copy-Item -LiteralPath $Source -Destination $stage
+            if ((Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $stage -Algorithm SHA256).Hash) { throw 'Migrated resource hash mismatch.' }
+            [IO.File]::Move($stage, $Destination)
+            $script:MigrationCopied++
+        } finally { if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Force } }
+    }
+}
+
+function Measure-CodeCodexMigration([string]$Source, [string]$Destination) {
+    $item = Get-Item -LiteralPath $Source -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return [long]0 }
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Redirected migration source refused: $Source" }
+    if (-not $item.PSIsContainer) { if (Test-Path -LiteralPath $Destination) { return [long]0 }; return [long]$item.Length }
+    [long]$size = 0
+    foreach ($child in Get-ChildItem -LiteralPath $Source -Force) { $size += Measure-CodeCodexMigration $child.FullName (Join-Path $Destination $child.Name) }
+    return $size
+}
+
+function Test-CodeCodexAtomicStorage([string]$Root, [scriptblock]$Progress = {param($phase,$status)}) {
+    $full = Assert-CodeCodexRoot $Root
+    if (-not (Test-Path -LiteralPath $full -PathType Container)) { throw 'Atomic storage probe requires an existing verified directory.' }
+    $prefix = Join-Path $full ('.atomic-check-' + [Guid]::NewGuid().ToString('N'))
+    $source = $prefix + '.source'; $target = $prefix + '.target'; $replacement = $prefix + '.replacement'; $backup = $prefix + '.backup'
+    $phase = 'create'; $failure = $null; $cleanup = @()
+    try {
+        & $Progress $phase 'started'
+        [IO.File]::WriteAllText($source,'probe-source')
+        & $Progress $phase 'passed'
+        $phase = 'rename'; & $Progress $phase 'started'
+        [IO.File]::Move($source,$target)
+        & $Progress $phase 'passed'
+        $phase = 'replace'; & $Progress $phase 'started'
+        [IO.File]::WriteAllText($replacement,'probe-replacement')
+        [IO.File]::Replace($replacement,$target,$backup,$true)
+        if ([IO.File]::ReadAllText($target) -ne 'probe-replacement') { throw 'Atomic replacement probe content mismatch.' }
+        & $Progress $phase 'passed'
+    } catch { $failure = $_; & $Progress $phase 'failed' }
+    finally {
+        foreach ($path in @($source,$target,$replacement,$backup)) {
+            try {
+                # Only these four exact task-created regular nodes are eligible.
+                if ([IO.Path]::GetDirectoryName($path) -ne $full) { throw 'Probe cleanup path escaped its verified root.' }
+                $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+                if ($item) {
+                    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Probe cleanup encountered a redirected node.' }
+                    Remove-Item -LiteralPath $path -Force
+                }
+            } catch { $cleanup += $_.Exception.GetBaseException().Message }
+        }
+        & $Progress 'cleanup' $(if ($cleanup.Count) {'partial'} else {'passed'})
+    }
+    if ($failure) { throw [IO.IOException]::new(('Storage replacement preflight failed; phase='+$phase+'; cleanupIssues='+$cleanup.Count),$failure.Exception) }
+    if ($cleanup.Count) { throw [IO.IOException]::new(('Storage probe cleanup failed: '+($cleanup -join '; '))) }
+}
+
+function Initialize-CodeCodexStorage([string]$Root) {
+    $script:MigrationCopied = 0; $script:MigrationSkipped = 0
+    [long]$required = 100MB
+    $legacy = Join-Path $env:LOCALAPPDATA 'CodeCodex'
+    foreach ($pair in @(@('settings.json','data\settings.json'),@('runtime-logs','logs\runtime'),@('diagnostics','logs\diagnostics'),@('plugin-cache\plugins','plugins'))) {
+        $required += Measure-CodeCodexMigration (Join-Path $legacy $pair[0]) (Join-Path $Root $pair[1])
+    }
+    $previous = Get-ItemProperty 'HKCU:\Software\CodeCodex' -ErrorAction SilentlyContinue
+    if ($previous -and $previous.RetainedRoot) {
+        $previousRoot = Assert-CodeCodexRoot ([string]$previous.RetainedRoot) -Owned
+        if (-not $Root.Equals($previousRoot,[StringComparison]::OrdinalIgnoreCase)) {
+            foreach ($relative in @('data','plugins','logs','backups')) { $required += Measure-CodeCodexMigration (Join-Path $previousRoot $relative) (Join-Path $Root $relative) }
+        }
+    }
+    $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($Root))
+    if ($drive.AvailableFreeSpace -lt $required) { throw "Insufficient space for verified migration and installation: required=$required; available=$($drive.AvailableFreeSpace)." }
+    foreach ($relative in @('data','plugins','logs\runtime','logs\diagnostics','logs\install','logs\update','temp','backups')) {
+        $target = Join-Path $Root $relative
+        $null = Assert-CodeCodexRoot $target
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+    }
+    # Keep private preferences and diagnostic content private even on a shared data drive.
+    foreach ($relative in @('data','logs','temp','backups')) {
+        $target = Join-Path $Root $relative
+        $acl = [IO.Directory]::GetAccessControl($target, [Security.AccessControl.AccessControlSections]::Access)
+        $acl.SetAccessRuleProtection($true, $false)
+        foreach ($existingRule in @($acl.Access)) { $null = $acl.RemoveAccessRuleSpecific($existingRule) }
+        foreach ($sid in @([Security.Principal.WindowsIdentity]::GetCurrent().User, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'), [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) {
+            $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+            $acl.AddAccessRule($rule)
+        }
+        [IO.Directory]::SetAccessControl($target, $acl)
+    }
+    $registered = Get-ItemProperty 'HKCU:\Software\CodeCodex' -ErrorAction SilentlyContinue
+    $retained = if ($registered) { [string]$registered.RetainedRoot } else { '' }
+    if ($retained -and -not $Root.Equals($retained,[StringComparison]::OrdinalIgnoreCase)) {
+        $retained = Assert-CodeCodexRoot $retained -Owned
+        foreach ($relative in @('data','plugins','logs','backups')) {
+            Copy-CodeCodexDataTree (Join-Path $retained $relative) (Join-Path $Root $relative)
+        }
+    }
+    $old = Join-Path $env:LOCALAPPDATA 'CodeCodex'
+    foreach ($pair in @(@('settings.json','data\settings.json'),@('runtime-logs','logs\runtime'),@('diagnostics','logs\diagnostics'))) {
+        Copy-CodeCodexDataTree (Join-Path $old $pair[0]) (Join-Path $Root $pair[1])
+    }
+    $oldPlugins = Join-Path $old 'plugin-cache'
+    if (Test-Path -LiteralPath $oldPlugins) {
+        $null = Assert-CodeCodexRoot $oldPlugins
+        foreach ($item in Get-ChildItem -LiteralPath $oldPlugins -Force) {
+            if ($item.Name -eq 'plugins' -or $item.Name -match '^[a-z0-9-]+-[a-f0-9]{64}\.js$') {
+                Copy-CodeCodexDataTree $item.FullName (Join-Path $Root $item.Name)
+            }
+        }
+    }
+    $report = [ordered]@{schema=1;copied=$script:MigrationCopied;preservedDestination=$script:MigrationSkipped;sourceRetained=$true;retainedRootMigrated=[bool]($retained -and -not $Root.Equals($retained,[StringComparison]::OrdinalIgnoreCase));completedAt=[DateTime]::UtcNow.ToString('o')}
+    [IO.File]::WriteAllText((Join-Path $Root 'backups\legacy-migration.json'),($report|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
+}
+
+function Show-CodeCodexDirectoryChoice([string]$Initial, [bool]$Existing) {
+    Add-Type -AssemblyName System.Windows.Forms
+    $form = New-Object Windows.Forms.Form
+    $form.Text='Code-Codex installation'; $form.Width=620; $form.Height=225
+    $form.StartPosition='CenterScreen'; $form.FormBorderStyle='FixedDialog'; $form.MaximizeBox=$false; $form.MinimizeBox=$false; $form.TopMost=$true
+    $label=New-Object Windows.Forms.Label; $label.Text=if($Existing){'Update in the existing folder. Settings, plugins and logs are preserved.'}else{'Choose one folder for Code-Codex, settings, plugins and logs.'}; $label.SetBounds(20,18,560,32); $form.Controls.Add($label)
+    $box=New-Object Windows.Forms.TextBox; $box.Text=$Initial; $box.SetBounds(20,57,460,26); $box.ReadOnly=$Existing; $form.Controls.Add($box)
+    $browse=New-Object Windows.Forms.Button; $browse.Text='Browse...'; $browse.SetBounds(488,55,90,30); $browse.Enabled=-not $Existing; $form.Controls.Add($browse)
+    $browse.Add_Click({$dialog=New-Object Windows.Forms.FolderBrowserDialog; $dialog.Description='Select a parent folder. A dedicated Code-Codex subfolder will be created.'; if($dialog.ShowDialog() -eq 'OK'){$box.Text=Join-Path $dialog.SelectedPath 'Code-Codex'}; $dialog.Dispose()}.GetNewClosure())
+    $note=New-Object Windows.Forms.Label; $note.Text='Default: current user installation on C: (no administrator rights required).'; $note.SetBounds(20,92,560,25); $form.Controls.Add($note)
+    $ok=New-Object Windows.Forms.Button; $ok.Text=if($Existing){'Update'}else{'Install'}; $ok.SetBounds(388,130,90,32); $ok.DialogResult='OK'; $form.Controls.Add($ok); $form.AcceptButton=$ok
+    $cancel=New-Object Windows.Forms.Button; $cancel.Text='Cancel'; $cancel.SetBounds(488,130,90,32); $cancel.DialogResult='Cancel'; $form.Controls.Add($cancel); $form.CancelButton=$cancel
+    try { if($form.ShowDialog() -ne 'OK'){return $null}; return $box.Text } finally { $form.Dispose() }
+}
+# storage-contract:end
 
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
@@ -18,12 +216,24 @@ $SourceUninstallerExecutable = Join-Path $SourceRoot "code-codex-uninstall.exe"
 $SourceUninstaller = Join-Path $SourceRoot "Uninstall-CodeCodex.ps1"
 $SourceFinalizer = Join-Path $SourceRoot "Finalize-Uninstall.ps1"
 $SourceBrandIcon = Join-Path $SourceRoot "CodeCodex.Brand.png"
-$InstallRoot = Join-Path $env:LOCALAPPDATA "Programs\Code-Codex"
-$ProgramsRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Programs"))
-$VersionsRoot = Join-Path $InstallRoot "versions"
-$VersionRoot = Join-Path $VersionsRoot $Version
+$RegisteredRoot = Get-CodeCodexRegisteredRoot
+if ([string]::IsNullOrWhiteSpace($InstallRoot)) { $InstallRoot = $RegisteredRoot }
+$VersionsRoot = $null
+$VersionRoot = $null
+$StorageRegistryBefore = Get-ItemProperty 'HKCU:\Software\CodeCodex' -ErrorAction SilentlyContinue
+$StorageMarkerBefore = $null
+$script:StorageSnapshotTaken = $false
+
+$script:InstallTrace = [Collections.Generic.List[object]]::new()
+$script:InstallClock = [Diagnostics.Stopwatch]::StartNew()
+function Trace-Install([string]$Phase, [string]$Outcome, [int]$Attempt = 0) {
+    if ($script:InstallTrace.Count -ge 128) { $script:InstallTrace.RemoveAt(0) }
+    $script:InstallTrace.Add([ordered]@{ elapsedMs=$script:InstallClock.ElapsedMilliseconds; phase=$Phase; outcome=$Outcome; attempt=$Attempt })
+}
+Trace-Install 'entry' 'started'
 
 function Publish-CodeCodexProgress([int]$Percent, [string]$Stage, [string]$Detail) {
+    Trace-Install $Stage 'started'
     $script:InstallStage = $Stage
     $script:InstallOperation = $Stage
     $script:InstallTarget = ""
@@ -45,12 +255,16 @@ function Invoke-InstallFileOperation([string]$Operation, [string]$Target, [scrip
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         $script:InstallAttempt = $attempt
         try {
+            Trace-Install $Operation 'started' $attempt
             & $Action
+            Trace-Install $Operation 'passed' $attempt
             return
         }
         catch {
+            Trace-Install $Operation 'failed' $attempt
             $code = [Convert]::ToString($_.Exception.GetBaseException().HResult, 16).ToUpperInvariant()
             if ($attempt -eq 3 -or $code -notin @("80070020", "80070021")) { throw }
+            Trace-Install $Operation 'retry scheduled' ($attempt + 1)
             Start-Sleep -Milliseconds (150 * $attempt)
         }
     }
@@ -60,7 +274,19 @@ function Write-InstallDiagnostic($Failure) {
     $baseError = $Failure.Exception.GetBaseException()
     $hresult = [Convert]::ToString($baseError.HResult, 16).ToUpperInvariant().PadLeft(8, '0')
     $win32 = if ($hresult.StartsWith('8007')) { [Convert]::ToInt32($hresult.Substring(4), 16) } else { $null }
+    $causes = @(); $cause=$Failure.Exception
+    while ($null -ne $cause -and $causes.Count -lt 8) {
+        $causes += [ordered]@{exceptionType=$cause.GetType().FullName;hresult=$cause.HResult;messageBase64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($cause.Message))}
+        $cause=$cause.InnerException
+    }
     $detail = [ordered]@{
+        schema = 2
+        timeline = @($script:InstallTrace.ToArray())
+        exceptionChain = $causes
+        chainTruncated = ($null -ne $cause)
+        errorId = $Failure.FullyQualifiedErrorId
+        category = [string]$Failure.CategoryInfo.Category
+        processEnvironment = [ordered]@{ powershell=$PSVersionTable.PSVersion.ToString(); languageMode=[string]$ExecutionContext.SessionState.LanguageMode; process64Bit=[Environment]::Is64BitProcess; os64Bit=[Environment]::Is64BitOperatingSystem }
         stage = $script:InstallStage
         operation = $script:InstallOperation
         targetName = if ($script:InstallTarget) { Split-Path -Leaf $script:InstallTarget } else { "" }
@@ -72,7 +298,7 @@ function Write-InstallDiagnostic($Failure) {
         line = $Failure.InvocationInfo.ScriptLineNumber
         messageBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($baseError.Message))
     }
-    [Console]::Out.WriteLine('CODECODEX_INSTALL_ERROR:' + (ConvertTo-Json -InputObject $detail -Compress))
+    [Console]::Out.WriteLine('CODECODEX_INSTALL_ERROR:' + (ConvertTo-Json -InputObject $detail -Depth 8 -Compress))
 }
 
 function Test-ReparsePoint([IO.FileSystemInfo]$Item) {
@@ -248,6 +474,12 @@ function Copy-SafeDocumentTree([string]$Source, [string]$Destination) {
 }
 
 function Write-AtomicText([string]$Destination, [string]$Content) {
+    # Version-independent storage markers need no replacement during a hot update.
+    # Preserve the existing file when content is identical, including rollback.
+    if (Test-Path -LiteralPath $Destination -PathType Leaf) {
+        [void](Assert-RegularFile $Destination "Installation marker")
+        if ([IO.File]::ReadAllText($Destination) -eq $Content) { return }
+    }
     $directory = Split-Path -Parent $Destination
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
     $temporary = Join-Path $directory (".{0}.{1}.tmp" -f (Split-Path -Leaf $Destination), [Guid]::NewGuid().ToString("N"))
@@ -273,6 +505,22 @@ function Write-AtomicText([string]$Destination, [string]$Content) {
 }
 
 $script:InstallRollbackPrepared = $false
+function Save-CodeCodexInstallReport([string]$Outcome) {
+    try {
+        $owned = $false
+        if ($script:StorageSnapshotTaken -and (Test-Path -LiteralPath (Join-Path $InstallRoot 'storage-layout.json') -PathType Leaf)) {
+            try { $null=Assert-CodeCodexRoot $InstallRoot -Owned; $owned=$true } catch { $owned=$false }
+        }
+        $folder = if ($owned) { Join-Path $InstallRoot 'logs\install' } else { Join-Path $env:TEMP 'CodeCodex\logs\install' }
+        $null = Assert-CodeCodexRoot $folder
+        New-Item -ItemType Directory -Path $folder -Force | Out-Null
+        $report=[ordered]@{schema=1;version=$Version;outcome=$Outcome;timeline=@($script:InstallTrace.ToArray());migrationCopied=$script:MigrationCopied;migrationSkipped=$script:MigrationSkipped;rollbackIssues=@($script:CleanupIssues)}
+        $path=Join-Path $folder ('install-'+[DateTime]::UtcNow.ToString('yyyyMMddHHmmssfff')+'-'+$PID+'.json')
+        [IO.File]::WriteAllText($path,($report|ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
+        Get-ChildItem -LiteralPath $folder -Filter 'install-*.json' -File | Sort-Object Name -Descending | Select-Object -Skip 10 | ForEach-Object { if(-not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)){Remove-Item -LiteralPath $_.FullName -Force} }
+    } catch { Write-Warning ('Install report could not be saved: '+$_.Exception.Message) }
+}
+
 $script:CreatedVersionRoot = $false
 $script:InstallCommitted = $false
 $previousVersionMarker = $null
@@ -304,11 +552,26 @@ foreach ($payload in $requiredPayload) {
     }
 }
 
-$programsItem = Get-ExistingItem $ProgramsRoot
-if ($null -ne $programsItem -and
-    (-not $programsItem.PSIsContainer -or (Test-ReparsePoint $programsItem))) {
-    throw "Refusing to install through a non-directory or reparse-point Programs path: $ProgramsRoot"
+$installedBefore = Test-Path -LiteralPath (Join-Path $RegisteredRoot 'current-version') -PathType Leaf
+if ($SelectDirectory) {
+    $selected = Show-CodeCodexDirectoryChoice $InstallRoot $installedBefore
+    if ($null -eq $selected) { Write-Host 'CODECODEX_INSTALL_CANCELLED'; exit 0 }
+    $InstallRoot = $selected
 }
+$InstallRoot = Assert-CodeCodexRoot $InstallRoot
+if ($installedBefore -and -not $InstallRoot.Equals([IO.Path]::GetFullPath($RegisteredRoot).TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)) {
+    throw 'An existing installation must be updated in its registered folder. To relocate, uninstall with KeepSettings first, then select the new folder.'
+}
+$VersionsRoot = Join-Path $InstallRoot 'versions'
+$VersionRoot = Join-Path $VersionsRoot $Version
+if (Test-Path -LiteralPath $InstallRoot) {
+    $children = @(Get-ChildItem -LiteralPath $InstallRoot -Force)
+    if ($children.Count -gt 0 -and -not (Test-Path -LiteralPath (Join-Path $InstallRoot 'storage-layout.json')) -and -not $installedBefore) {
+        throw 'The selected folder is not empty or owned by Code-Codex. Choose an empty dedicated folder.'
+    }
+}
+$disk = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($InstallRoot))
+if ($disk.AvailableFreeSpace -lt 100MB) { throw 'At least 100 MB of free disk space is required before installation and migration.' }
 $existingInstall = Get-ExistingItem $InstallRoot
 if ($null -ne $existingInstall -and
     (-not $existingInstall.PSIsContainer -or (Test-ReparsePoint $existingInstall))) {
@@ -343,12 +606,10 @@ if ($installDocumentation) {
 }
 
 $installFullPath = [IO.Path]::GetFullPath($InstallRoot)
-$programsPrefix = $ProgramsRoot.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 $versionFullPath = [IO.Path]::GetFullPath($VersionRoot)
 $installPrefix = $installFullPath.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-if (-not $installFullPath.StartsWith($programsPrefix, [StringComparison]::OrdinalIgnoreCase) -or
-    -not $versionFullPath.StartsWith($installPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-    throw "Refusing to install outside the expected per-user Programs directory."
+if (-not $versionFullPath.StartsWith($installPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing a version path outside the selected installation root."
 }
 
 $installTypePath = Join-Path $InstallRoot "install-type"
@@ -390,6 +651,21 @@ $installRootItem = Get-ExistingItem $InstallRoot
 if ($null -eq $installRootItem -or -not $installRootItem.PSIsContainer -or (Test-ReparsePoint $installRootItem)) {
     throw "The installation root must be a regular directory."
 }
+$script:InstallOperation = 'Preparing centralized storage'
+$StorageMarkerPath = Join-Path $InstallRoot 'storage-layout.json'
+if (Get-ExistingItem $StorageMarkerPath) {
+    $null=Assert-CodeCodexRoot $InstallRoot -Owned
+    $StorageMarkerBefore = [IO.File]::ReadAllText($StorageMarkerPath)
+}
+$script:StorageSnapshotTaken = $true
+$script:InstallOperation = 'Checking storage replacement capability'
+$script:InstallTarget = $InstallRoot
+Test-CodeCodexAtomicStorage $InstallRoot { param($phase,$status) Trace-Install ('Storage preflight '+$phase) $status 0 }
+Publish-CodeCodexProgress 70 'Migrating existing data' 'Copying settings, verified plugins and logs; keeping original data for recovery.'
+# Retain this product marker after an interrupted migration so a retry can resume safely.
+Write-AtomicText $StorageMarkerPath '{"schema":1,"product":"Code-Codex","layout":"centralized"}'
+Initialize-CodeCodexStorage $InstallRoot
+Trace-Install 'storage migration' ('passed; copied=' + $script:MigrationCopied + '; preservedDestination=' + $script:MigrationSkipped)
 $script:InstallOperation = "Saving shortcut rollback state"
 & $SourceShortcutTool prepare-install --install-root $InstallRoot | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "The shortcut rollback state could not be prepared." }
@@ -464,6 +740,9 @@ if ($installDocumentation) {
 
 Write-AtomicText (Join-Path $InstallRoot "current-version") ($Version + "`n")
 Write-AtomicText (Join-Path $InstallRoot "install-type") "portable`n"
+Write-AtomicText $StorageMarkerPath '{"schema":1,"product":"Code-Codex","layout":"centralized"}'
+New-Item 'HKCU:\Software\CodeCodex' -Force | Out-Null
+New-ItemProperty 'HKCU:\Software\CodeCodex' -Name InstallPath -Value $InstallRoot -PropertyType String -Force | Out-Null
 
 Publish-CodeCodexProgress 88 "Registering installation" "Updating the Windows installed-app entry."
 # Remove the obsolete sign-in launch entry. The existing Codex or ChatGPT
@@ -534,15 +813,16 @@ Publish-CodeCodexProgress 96 "Shortcut ready" "Code-Codex will start from $([IO.
 $installedCommandLine = Join-Path $VersionRoot "code-codex.exe"
 Publish-CodeCodexProgress 98 "Activating Code-Codex" "Refreshing any currently open Codex window."
 try {
-    Start-Process `
+    if (-not $NoActivate) { Start-Process `
         -FilePath $installedCommandLine `
         -ArgumentList @("activate") `
-        -WindowStyle Hidden | Out-Null
+        -WindowStyle Hidden | Out-Null }
 }
 catch {
     Write-Warning "Code-Codex was installed, but the currently open Codex window could not be updated automatically: $($_.Exception.Message)"
 }
 
+Save-CodeCodexInstallReport 'passed'
 Write-Host "Code-Codex managed shortcut: $managedShortcut"
 Write-Host "Installed Code-Codex $Version. Open the managed desktop shortcut to start Codex with Code-Codex."
 }
@@ -550,6 +830,13 @@ catch {
     $failure = $_
     $rollbackIssues = @($script:CleanupIssues)
     if (-not $script:InstallCommitted) {
+        if ($script:StorageSnapshotTaken) {
+            try {
+                if ($null -ne $StorageMarkerBefore) { Write-AtomicText $StorageMarkerPath $StorageMarkerBefore }
+                if ($StorageRegistryBefore -and $StorageRegistryBefore.InstallPath) { Set-ItemProperty 'HKCU:\Software\CodeCodex' -Name InstallPath -Value $StorageRegistryBefore.InstallPath }
+                else { Remove-ItemProperty 'HKCU:\Software\CodeCodex' -Name InstallPath -ErrorAction SilentlyContinue }
+            } catch { $rollbackIssues += 'storage locator rollback failed' }
+        }
         if ($script:InstallRollbackPrepared) {
             & $SourceShortcutTool rollback-install --install-root $InstallRoot | Out-Null
             if ($LASTEXITCODE -ne 0) { $rollbackIssues += "shortcut rollback failed" }
@@ -593,6 +880,7 @@ catch {
         }
     }
     Write-InstallDiagnostic $failure
+    Save-CodeCodexInstallReport 'failed'
     if ($rollbackIssues.Count -gt 0) {
         [Console]::Out.WriteLine('CODECODEX_ROLLBACK_ERROR:' + ($rollbackIssues -join '; '))
     }

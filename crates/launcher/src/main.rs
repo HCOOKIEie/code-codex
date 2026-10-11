@@ -3,13 +3,17 @@ mod bridge;
 mod discovery;
 mod early_startup;
 mod exit_codes;
+mod fault_diagnostics;
 #[allow(dead_code)]
 mod gui_support;
 mod network_diagnostics;
 mod plugin_store;
+mod process_diagnostics;
 mod process_guard;
+mod renderer_storage;
 mod runtime_log;
 mod startup_diagnostics;
+mod support_checks;
 
 use std::path::PathBuf;
 use std::process::{ExitCode, Stdio};
@@ -64,12 +68,15 @@ struct StartupTrace {
 }
 
 static STARTUP_TRACE: OnceLock<Mutex<StartupTrace>> = OnceLock::new();
+static FAILURE_CHECK_STARTED: OnceLock<Instant> = OnceLock::new();
+static ORIGINAL_FAILURE: OnceLock<StartupDiagnostic> = OnceLock::new();
 
 fn startup_trace() -> &'static Mutex<StartupTrace> {
     STARTUP_TRACE.get_or_init(|| Mutex::new(StartupTrace::default()))
 }
 
 fn begin_startup_trace(mode: &'static str) {
+    process_diagnostics::reset();
     if let Ok(mut trace) = startup_trace().lock() {
         *trace = StartupTrace {
             started: Some(Instant::now()),
@@ -92,6 +99,7 @@ fn record_startup_event(stage: &'static str, outcome: &'static str) {
 }
 
 fn record_launch_context(renderer_port: u16, inspector_port: Option<u16>, pid: u32) {
+    process_diagnostics::retain_activation_handle(pid);
     runtime_log::record(
         "launcher",
         "launch context",
@@ -162,6 +170,8 @@ fn startup_trace_report() -> String {
         report.push_str("\nPre-cleanup live-launch check:\n");
         report.push_str(probe);
     }
+    report.push_str("\n");
+    report.push_str(&process_diagnostics::report());
     if let Some(progress) = &trace.supervisor_progress {
         let state = progress.snapshot();
         report.push_str(&format!(
@@ -196,7 +206,25 @@ fn startup_trace_report() -> String {
 
 fn enrich_startup_diagnostic(error: &AppError) -> StartupDiagnostic {
     let mut diagnostic = error.startup_diagnostic();
+    if let Some(original) = ORIGINAL_FAILURE.get()
+        && original != &diagnostic
+    {
+        diagnostic.reason.push_str(&format!(
+            "\nOriginal first failure (retained):\nSupport code: {}\nStage: {}\nReason: {}\n",
+            original.code, original.stage, original.reason
+        ));
+    }
     diagnostic.reason.push_str(&startup_trace_report());
+    diagnostic.reason.push_str(&format!(
+        "\nFault interpretation (observation only):\n{}\n",
+        runtime_log::redaction::value(fault_diagnostics::enrich(
+            "launcher",
+            &diagnostic.stage,
+            "failed",
+            json!({"code":diagnostic.code,"reason":diagnostic.reason})
+        ))
+    ));
+    diagnostic.reason.push_str(&support_checks::report());
     diagnostic
 }
 
@@ -254,6 +282,73 @@ async fn complete_startup_failure_probe() {
         }
     }
     record_precleanup_probe(observations.join("\n"));
+}
+
+fn publish_startup_diagnostic(error: &AppError, checks: &str) {
+    FAILURE_CHECK_STARTED.get_or_init(Instant::now);
+    ORIGINAL_FAILURE.get_or_init(|| error.startup_diagnostic());
+    let mut diagnostic = enrich_startup_diagnostic(error);
+    diagnostic.reason.push_str(checks);
+    if let Some(line) = diagnostic.encoded_line() {
+        eprintln!("{line}");
+    }
+}
+
+async fn automatic_failure_checks(error: &AppError) -> String {
+    let started = *FAILURE_CHECK_STARTED.get_or_init(Instant::now);
+    let mut report = String::from("\nAutomatic self-check: running (15 second budget)\n");
+    publish_startup_diagnostic(error, &report);
+    runtime_log::record(
+        "diagnostics",
+        "automatic failure checks",
+        "started",
+        json!({"budgetMs":15000,"readOnly":true}),
+    );
+    let budget = Duration::from_secs(15).saturating_sub(started.elapsed());
+    let outcome = tokio::time::timeout(budget, async {
+        report.push_str(
+            "Live-launch observations: started; existing pre-cleanup evidence is retained.\n",
+        );
+        publish_startup_diagnostic(error, &report);
+        complete_startup_failure_probe().await;
+        support_checks::run_with_progress(|phase, outcome, evidence| {
+            let evidence = runtime_log::redaction::value(evidence.clone());
+            report.push_str(&format!(
+                "+{} ms | {phase} | {outcome}\n{}\n",
+                started.elapsed().as_millis(),
+                serde_json::to_string_pretty(&evidence).unwrap_or_default()
+            ));
+            publish_startup_diagnostic(error, &report);
+        })
+        .await;
+    })
+    .await;
+    let status = if outcome.is_ok() {
+        "completed"
+    } else {
+        "timeout"
+    };
+    report = report.replacen(
+        "Automatic self-check: running",
+        &format!("Automatic self-check: {status}"),
+        1,
+    );
+    report.push_str(&format!(
+        "Automatic self-check: {status}; elapsed={} ms.\n",
+        started.elapsed().as_millis()
+    ));
+    report.push_str("Recovery assessment: original safe query/connection retries are recorded in the preceding launch evidence. No successful functional recovery is established by these checks. No automatic relaunch, policy change, settings reset or resource deletion was performed.\nUnavailable checks are not passes; a completed inspection does not mean the original error was fixed.\n");
+    if outcome.is_err() {
+        report.push_str("The total budget expired; unfinished checks were cancelled and partial results retained.\n");
+    }
+    runtime_log::record(
+        "diagnostics",
+        "automatic failure checks",
+        status,
+        json!({"durationMs":started.elapsed().as_millis(),"report":report}),
+    );
+    publish_startup_diagnostic(error, &report);
+    report
 }
 
 #[derive(Debug, Parser)]
@@ -353,6 +448,9 @@ struct ActivateArgs {
 
 #[derive(Debug, Args)]
 struct DiagnoseArgs {
+    /// Collect bounded read-only support checks without starting Codex.
+    #[arg(long)]
+    full: bool,
     #[arg(long, value_enum, default_value_t = ChannelPreference::Any)]
     channel: ChannelPreference,
     #[arg(long)]
@@ -896,6 +994,14 @@ fn process_diagnostic(error: &ProcessGuardError) -> (&'static str, &'static str)
                 "The activated Codex process could not be inspected",
             )
         }
+        ProcessGuardError::Detailed(detail) if detail.starts_with("existing process query") => (
+            "CC-START-PROCESS-011",
+            "The existing Codex process state could not be inspected",
+        ),
+        ProcessGuardError::Detailed(detail) if detail.starts_with("listener discovery query") => (
+            "CC-START-PROCESS-012",
+            "The existing Codex debugging port could not be discovered",
+        ),
         ProcessGuardError::Detailed(detail)
             if detail.starts_with("listener ownership query")
                 || detail.starts_with("listener ownership response") =>
@@ -991,7 +1097,7 @@ async fn main() -> ExitCode {
         Commands::Diagnose(_) => "diagnose",
         Commands::Plugins { .. } => "plugins",
     };
-    if mode != "diagnose" {
+    if mode != "diagnose" || matches!(&command, Commands::Diagnose(args) if args.full) {
         runtime_log::begin(mode);
     }
     begin_startup_trace(mode);
@@ -1020,8 +1126,9 @@ async fn main() -> ExitCode {
         Err(error) => {
             tracing::error!(event = "launcher_failed", error = %error);
             record_startup_event("exit", "startup failed");
-            complete_startup_failure_probe().await;
-            let diagnostic = enrich_startup_diagnostic(&error);
+            let checks = automatic_failure_checks(&error).await;
+            let mut diagnostic = enrich_startup_diagnostic(&error);
+            diagnostic.reason.push_str(&checks);
             runtime_log::record(
                 "launcher",
                 "startup diagnostic",
@@ -1171,7 +1278,15 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         if let Err(error) = identity_result {
             record_startup_event("process identity", "verification failed");
             record_precleanup_probe(format!("Process: {}", launched_process_state(launched_pid)));
+            record_startup_event(
+                "cleanup",
+                "stopping unarmed activation helper after identity failure",
+            );
             child.terminate().await;
+            record_startup_event(
+                "cleanup",
+                "unarmed activation helper stopped; no termination authorized by identity check",
+            );
             return Err(error.into());
         }
         record_startup_event("process identity", "official executable verified");
@@ -1284,14 +1399,31 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
         }
     }
     .await;
+    let supervisor_started = startup_trace()
+        .lock()
+        .is_ok_and(|trace| trace.supervisor_progress.is_some());
     record_startup_event(
-        "renderer supervisor",
+        if supervisor_started {
+            "renderer supervisor"
+        } else {
+            "launch preparation"
+        },
         if result.is_err() { "failed" } else { "ended" },
     );
     if result.is_err() {
-        record_precleanup_probe(
-            live_launch_snapshot(endpoint, main_inspector_port, launched_pid).await,
-        );
+        if let Err(error) = &result {
+            publish_startup_diagnostic(
+                error,
+                "\nAutomatic self-check: preserving live-launch evidence before cleanup.\n",
+            );
+        }
+        process_diagnostics::native_observation("pre-cleanup", Some(port), Some(launched_pid));
+        let snapshot = tokio::time::timeout(
+            Duration::from_secs(8),
+            live_launch_snapshot(endpoint, main_inspector_port, launched_pid),
+        )
+        .await;
+        record_precleanup_probe(snapshot.unwrap_or_else(|_|format!("Process: {}\nLive-launch supplementary probes timed out after 8 seconds; preceding native observations retained.",launched_process_state(launched_pid))));
     }
     let result = match result {
         Err(AppError::Cdp(CdpError::NoCompatibleTarget | CdpError::IncompatibleRenderer)) => {
@@ -1301,6 +1433,19 @@ async fn run(args: RunArgs) -> Result<(), AppError> {
     };
     record_startup_event("cleanup", "terminating launched Codex process");
     child.terminate().await;
+    record_startup_event(
+        "cleanup",
+        "process guard termination returned; inspect observed state",
+    );
+    process_diagnostics::observe(
+        "cleanup",
+        "activation PID after termination",
+        "observed",
+        process_diagnostics::native_process(launched_pid),
+    );
+    if result.is_err() {
+        process_diagnostics::native_observation("post-cleanup", Some(port), Some(launched_pid));
+    }
     drop(early_player);
     result
 }
@@ -2481,6 +2626,21 @@ struct DiagnosticReport {
 }
 
 async fn diagnose(args: DiagnoseArgs) -> Result<(), AppError> {
+    if args.full {
+        let checks = tokio::time::timeout(Duration::from_secs(14), support_checks::run()).await;
+        let report = match checks {
+            Ok(value) => value,
+            Err(_) => {
+                json!({"status":"timeout","budgetMs":14000,"partialResults":"Recorded support-check events remain in runtime logs","readOnly":true})
+            }
+        };
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .map_err(|_| LaunchFailure::DiagnosticSerialization)?
+        );
+        return Ok(());
+    }
     let installation = discover_codex(args.codex_exe.as_deref(), None, args.channel);
     let codex = match &installation {
         Ok(installation) => redacted_codex_diagnostic(installation),
@@ -2909,6 +3069,7 @@ mod tests {
 
     #[test]
     fn generic_errors_receive_the_same_bounded_startup_trace() {
+        let _guard = process_diagnostics::TEST_TRACE_LOCK.lock().unwrap();
         begin_startup_trace("run");
         record_startup_event("CDP version", "supported endpoint responded");
         record_renderer_port(13699);
@@ -3043,6 +3204,43 @@ mod tests {
         assert_eq!(
             startup_timeout_for_idle_policy(IdlePolicy::ExitAfterTimeout),
             Duration::from_secs(30)
+        );
+    }
+
+    #[test]
+    fn query_failure_keeps_process_code_and_observations_in_copy_details() {
+        let _guard = process_diagnostics::TEST_TRACE_LOCK.lock().unwrap();
+        begin_startup_trace("fixture");
+        process_diagnostics::observe(
+            "listener ownership",
+            "Get-NetTCPConnection",
+            "failed",
+            json!({"exceptionType":"CimException","hresult":-2147024891,"port":52346}),
+        );
+        let error = AppError::from(ProcessGuardError::Detailed(
+            "listener ownership query failed: fixture".into(),
+        ));
+        let diagnostic = enrich_startup_diagnostic(&error);
+        assert_eq!(diagnostic.code, "CC-START-PROCESS-006");
+        assert!(diagnostic.reason.contains("Get-NetTCPConnection"));
+        assert!(diagnostic.reason.contains("-2147024891"));
+        let decoded =
+            startup_diagnostics::parse_diagnostic(&diagnostic.encoded_line().expect("marker"))
+                .expect("decoded");
+        assert_eq!(decoded, diagnostic);
+        assert_eq!(
+            process_diagnostic(&ProcessGuardError::Detailed(
+                "existing process query failed".into()
+            ))
+            .0,
+            "CC-START-PROCESS-011"
+        );
+        assert_eq!(
+            process_diagnostic(&ProcessGuardError::Detailed(
+                "listener discovery query failed".into()
+            ))
+            .0,
+            "CC-START-PROCESS-012"
         );
     }
 
