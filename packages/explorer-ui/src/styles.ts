@@ -2858,12 +2858,13 @@ export const styles = String.raw`
   }
   .status-code[data-update-state="updateAvailable"]::after {
     display: block;
-    content: "";
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--cle-focus);
-    color: var(--cle-focus);
+    content: "↑";
+    width: 8px;
+    height: 10px;
+    font-size: 11px;
+    line-height: 10px;
+    color: var(--cle-added);
+    opacity: 0.8;
   }
   .status-code[data-feedback="error"]::after {
     display: block;
@@ -2895,7 +2896,7 @@ export const styles = String.raw`
   }
   @media (forced-colors: active) {
     .status-code[data-feedback="update"], .status-code[data-feedback="update"]:hover:not(:disabled) { background-image: none; color: ButtonText; }
-    .status-code[data-update-state="updateAvailable"]::after { background: Highlight; }
+    .status-code[data-update-state="updateAvailable"]::after { color: Highlight; opacity: 1; }
   }
 
   .resize-handle {

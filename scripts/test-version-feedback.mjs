@@ -38,8 +38,9 @@ try{
   await check('rainbow text is present',`getComputedStyle(${button}).backgroundImage.includes('linear-gradient')`);await snapshot('update');
   await delay(1000);await check('latest text stays visible during the 1.5s hold',`${button}.textContent==='↑ v999.0.0'`);
   await wait(`!${button}.dataset.feedback`,'restored');
-  await check('restores installed version and retains small update dot',`${button}.textContent==='v${version}' && getComputedStyle(${button},'::after').width==='5px'`);
-  await e(`${button}.click()`);await check('dot opens update dialog without another check or installation',`${button}.getAttribute('aria-expanded')==='true' && calls.filter(c=>c.method==='explorer.update.startup').length===1 && !calls.some(c=>c.method==='explorer.update.check'||c.method==='explorer.update.install')`);
+  await check('restores installed version and retains a subdued green update arrow',`(()=>{const b=${button},s=getComputedStyle(b,'::after'),rgb=s.color.match(/\\d+/g).map(Number);return b.textContent==='v${version}' && s.content.includes('↑') && s.width==='8px' && s.opacity==='0.8' && rgb[1]>rgb[0] && rgb[1]>rgb[2]})()`);
+  await snapshot('update-arrow');
+  await e(`${button}.click()`);await check('arrow opens update dialog without another check or installation',`${button}.getAttribute('aria-expanded')==='true' && calls.filter(c=>c.method==='explorer.update.startup').length===1 && !calls.some(c=>c.method==='explorer.update.check'||c.method==='explorer.update.install')`);
   await open('latest');await wait(`${button}?.dataset.feedback==='latest'`,'latest sweep');
   await check('latest keeps installed version and shows tick briefly',`${button}.textContent==='v${version}' && getComputedStyle(${button},'::after').content.includes('✓')`);
   await wait(`!${button}.dataset.feedback`,'tick gone');await check('latest tick clears after feedback',`getComputedStyle(${button},'::after').display==='none'`);

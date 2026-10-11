@@ -1,3 +1,9 @@
+## 本地维护 v0.4.18 / Local maintenance v0.4.18
+
+有新版可升级时，版本号右侧保留低调的绿色小箭头；已是最新版时不显示箭头。保留启动版本彩虹反馈和点击更新行为。尚未GitHub发布，24插件资源继续pin v0.3.96。
+
+An available update retains a subdued green arrow beside the installed version; an up-to-date version has no arrow. Startup rainbow feedback and update clicks remain. Not published to GitHub; all 24 plugins retain v0.3.96 assets.
+
 ## v0.4.17 — 集中存储、安装向导与诊断增强
 
 ### 简体中文
