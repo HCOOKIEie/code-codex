@@ -1,3 +1,21 @@
+## v0.4.17 — 集中存储、安装向导与诊断增强
+
+### 简体中文
+
+- 集中程序、插件、设置、个人素材和日志，支持首次 EXE 自定义目录、校验复制迁移与普通卸载保留数据。
+- 紧凑白色品牌安装向导、原生 DPI 与整体3∶1.8比例；首次安装完整流程，本版及后续文件树更新为 Installing → Finish。v0.4.4 首次升级使用完整向导。
+- 启动与安装失败自动限时只读自检、可复制完整报告、UI心跳/完成确认及更新窗口交接。
+- 最终候选461项Rust通过、3项忽略，12项生产WinForms通过，本机0.4.16→0.4.17安装与数据保留已验证；旧公开v0.4.4升级、独立MSI交互及远端冷启动未实测。
+- 2026-10-11经[PR #49](https://github.com/Rice-dog/code-codex/pull/49)合并，从main `cab26da` 发布为[GitHub Latest v0.4.17](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.17)。五个核心附件公开下载字节和digest核验通过；24插件继续复用v0.3.96。包内README保留构建时快照，公开说明单独同步，安装payload不变。
+
+### English
+
+- Centralizes programs, plugins, preferences, personal media and logs, with first-install EXE folder selection, verified copy migration and data retention on normal uninstall.
+- Compact white branded wizard with native DPI and a 3:1.8 overall ratio. First installs use the full flow; in-app updates from this version onward use Installing → Finish. A first upgrade from v0.4.4 uses the full wizard.
+- Bounded automatic read-only startup/installer failure checks, copyable full reports, UI heartbeat/completion acknowledgements and update-window handoff.
+- Final candidate: 461 Rust tests passed, 3 ignored, 12 production WinForms cases passed; local v0.4.16 → v0.4.17 installation and data retention verified. Public v0.4.4 upgrades, independent MSI interaction and remote cold starts remain untested.
+- Published on 2026-10-11 via [PR #49](https://github.com/Rice-dog/code-codex/pull/49), from main `cab26da`, as [GitHub Latest v0.4.17](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.17). Public bytes and digests of five core attachments verified; all 24 plugins retain v0.3.96 assets. Bundled READMEs remain the build-time snapshot; repository publication notes are updated separately without changing the installation payload.
+
 ## 本地维护 v0.4.17 / Local maintenance v0.4.17
 
 当前本地维护版 **0.4.17**：保持720逻辑像素客户区宽、整体宽高比3∶1.8的紧凑白色品牌安装向导按实际 DPI 绘制文字和控件，等比显示原始冰蓝背景，图标控制显示尺寸避免放大模糊，同一窗口依次显示 Welcome、License Agreement、Installation Folder、Installing、Finish。未同意 MIT 协议不能继续，Install 前不解包，完成后点击 Finish 关闭。已有安装锁定原目录；文件树内更新直接显示安装进度，完成后在同一品牌窗口显示Finish，跳过欢迎、协议和目录页。沿用集中目录迁移、参数与素材保存、完整错误报告及安装窗口交接机制。新增安装向导过程日志、stdout/stderr捕获、完成确认、心跳与失败后限时只读自检；同窗完整报告可复制，窗口不可用时独立提示。安装成功但完成UI失败不回滚。尚未 GitHub 发布，公开下载仍为 v0.4.4；插件资源继续复用 v0.3.96。
