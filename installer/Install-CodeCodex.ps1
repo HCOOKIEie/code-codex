@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.4.4"
+    [string]$Version = "0.4.9"
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,7 +23,16 @@ $ProgramsRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Programs"))
 $VersionsRoot = Join-Path $InstallRoot "versions"
 $VersionRoot = Join-Path $VersionsRoot $Version
 
+$script:InstallTrace = [Collections.Generic.List[object]]::new()
+$script:InstallClock = [Diagnostics.Stopwatch]::StartNew()
+function Trace-Install([string]$Phase, [string]$Outcome, [int]$Attempt = 0) {
+    if ($script:InstallTrace.Count -ge 128) { $script:InstallTrace.RemoveAt(0) }
+    $script:InstallTrace.Add([ordered]@{ elapsedMs=$script:InstallClock.ElapsedMilliseconds; phase=$Phase; outcome=$Outcome; attempt=$Attempt })
+}
+Trace-Install 'entry' 'started'
+
 function Publish-CodeCodexProgress([int]$Percent, [string]$Stage, [string]$Detail) {
+    Trace-Install $Stage 'started'
     $script:InstallStage = $Stage
     $script:InstallOperation = $Stage
     $script:InstallTarget = ""
@@ -45,12 +54,16 @@ function Invoke-InstallFileOperation([string]$Operation, [string]$Target, [scrip
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         $script:InstallAttempt = $attempt
         try {
+            Trace-Install $Operation 'started' $attempt
             & $Action
+            Trace-Install $Operation 'passed' $attempt
             return
         }
         catch {
+            Trace-Install $Operation 'failed' $attempt
             $code = [Convert]::ToString($_.Exception.GetBaseException().HResult, 16).ToUpperInvariant()
             if ($attempt -eq 3 -or $code -notin @("80070020", "80070021")) { throw }
+            Trace-Install $Operation 'retry scheduled' ($attempt + 1)
             Start-Sleep -Milliseconds (150 * $attempt)
         }
     }
@@ -60,7 +73,19 @@ function Write-InstallDiagnostic($Failure) {
     $baseError = $Failure.Exception.GetBaseException()
     $hresult = [Convert]::ToString($baseError.HResult, 16).ToUpperInvariant().PadLeft(8, '0')
     $win32 = if ($hresult.StartsWith('8007')) { [Convert]::ToInt32($hresult.Substring(4), 16) } else { $null }
+    $causes = @(); $cause=$Failure.Exception
+    while ($null -ne $cause -and $causes.Count -lt 8) {
+        $causes += [ordered]@{exceptionType=$cause.GetType().FullName;hresult=$cause.HResult;messageBase64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($cause.Message))}
+        $cause=$cause.InnerException
+    }
     $detail = [ordered]@{
+        schema = 2
+        timeline = @($script:InstallTrace.ToArray())
+        exceptionChain = $causes
+        chainTruncated = ($null -ne $cause)
+        errorId = $Failure.FullyQualifiedErrorId
+        category = [string]$Failure.CategoryInfo.Category
+        processEnvironment = [ordered]@{ powershell=$PSVersionTable.PSVersion.ToString(); languageMode=[string]$ExecutionContext.SessionState.LanguageMode; process64Bit=[Environment]::Is64BitProcess; os64Bit=[Environment]::Is64BitOperatingSystem }
         stage = $script:InstallStage
         operation = $script:InstallOperation
         targetName = if ($script:InstallTarget) { Split-Path -Leaf $script:InstallTarget } else { "" }
@@ -72,7 +97,7 @@ function Write-InstallDiagnostic($Failure) {
         line = $Failure.InvocationInfo.ScriptLineNumber
         messageBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($baseError.Message))
     }
-    [Console]::Out.WriteLine('CODECODEX_INSTALL_ERROR:' + (ConvertTo-Json -InputObject $detail -Compress))
+    [Console]::Out.WriteLine('CODECODEX_INSTALL_ERROR:' + (ConvertTo-Json -InputObject $detail -Depth 8 -Compress))
 }
 
 function Test-ReparsePoint([IO.FileSystemInfo]$Item) {

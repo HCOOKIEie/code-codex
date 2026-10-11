@@ -3,7 +3,9 @@ use std::env;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
-use std::process::{Command as StdCommand, Stdio};
+#[cfg(test)]
+use std::process::Command as StdCommand;
+use std::process::Stdio;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -79,6 +81,7 @@ pub struct CodexPackageGuard {
     control: Option<tokio::process::ChildStdin>,
     pid: u32,
     armed: bool,
+    stderr_reader: Option<tokio::task::JoinHandle<()>>,
 }
 
 #[cfg(windows)]
@@ -253,15 +256,20 @@ impl CodexProcessGuard {
                 .env("CLE_PACKAGE_ARGUMENTS", activation_arguments)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null())
+                .stderr(Stdio::piped())
                 .creation_flags(CREATE_NO_WINDOW);
 
             let mut helper = command.spawn()?;
+            let stderr_reader = helper
+                .stderr
+                .take()
+                .map(crate::process_diagnostics::capture_helper_stderr);
             let control = match helper.stdin.take() {
                 Some(control) => control,
                 None => {
                     let _ = helper.kill().await;
                     let _ = helper.wait().await;
+                    crate::process_diagnostics::finish_helper_capture(stderr_reader).await;
                     return Err(io::Error::other(
                         "package activation helper has no control pipe",
                     ));
@@ -270,7 +278,7 @@ impl CodexProcessGuard {
             let output = match helper.stdout.take() {
                 Some(output) => output,
                 None => {
-                    stop_unarmed_package_helper(helper, Some(control)).await;
+                    stop_unarmed_package_helper(helper, Some(control), stderr_reader).await;
                     return Err(io::Error::other(
                         "package activation helper has no result pipe",
                     ));
@@ -284,11 +292,11 @@ impl CodexProcessGuard {
             {
                 Ok(Ok(line)) => line,
                 Ok(Err(error)) => {
-                    stop_unarmed_package_helper(helper, Some(control)).await;
+                    stop_unarmed_package_helper(helper, Some(control), stderr_reader).await;
                     return Err(error);
                 }
                 Err(_) => {
-                    stop_unarmed_package_helper(helper, Some(control)).await;
+                    stop_unarmed_package_helper(helper, Some(control), stderr_reader).await;
                     return Err(io::Error::new(
                         io::ErrorKind::TimedOut,
                         "package activation helper did not report a result",
@@ -298,7 +306,7 @@ impl CodexProcessGuard {
             let activation: PackageActivationResult = match serde_json::from_slice(&result_line) {
                 Ok(activation) => activation,
                 Err(error) => {
-                    stop_unarmed_package_helper(helper, Some(control)).await;
+                    stop_unarmed_package_helper(helper, Some(control), stderr_reader).await;
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("invalid package activation result: {error}"),
@@ -306,7 +314,7 @@ impl CodexProcessGuard {
                 }
             };
             if activation.h_result < 0 || activation.process_id == 0 {
-                stop_unarmed_package_helper(helper, Some(control)).await;
+                stop_unarmed_package_helper(helper, Some(control), stderr_reader).await;
                 return Err(io::Error::other(format!(
                     "package activation failed with HRESULT 0x{:08X} and PID {}",
                     activation.h_result as u32, activation.process_id
@@ -318,6 +326,7 @@ impl CodexProcessGuard {
                 control: Some(control),
                 pid: activation.process_id,
                 armed: false,
+                stderr_reader,
             })))
         }
     }
@@ -458,6 +467,7 @@ impl CodexPackageGuard {
             let _ = self.helper.kill().await;
             let _ = self.helper.wait().await;
         }
+        crate::process_diagnostics::finish_helper_capture(self.stderr_reader.take()).await;
     }
 }
 
@@ -465,6 +475,7 @@ impl CodexPackageGuard {
 async fn stop_unarmed_package_helper(
     mut helper: tokio::process::Child,
     control: Option<tokio::process::ChildStdin>,
+    stderr_reader: Option<tokio::task::JoinHandle<()>>,
 ) {
     drop(control);
     if tokio::time::timeout(Duration::from_secs(2), helper.wait())
@@ -474,6 +485,7 @@ async fn stop_unarmed_package_helper(
         let _ = helper.kill().await;
         let _ = helper.wait().await;
     }
+    crate::process_diagnostics::finish_helper_capture(stderr_reader).await;
 }
 
 #[cfg(windows)]
@@ -519,6 +531,12 @@ async fn read_package_activation_line(output: tokio::process::ChildStdout) -> io
 const PACKAGE_ACTIVATION_SCRIPT: &str = r#"
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+function Write-CCActivation([string]$phase, [string]$outcome, $fields) {
+    $item=[ordered]@{phase=$phase;outcome=$outcome}
+    foreach($key in $fields.Keys){$item[$key]=$fields[$key]}
+    [Console]::Error.WriteLine('CC_PROCESS_QUERY='+(ConvertTo-Json -InputObject $item -Compress -Depth 4))
+}
+$activationStep='compile package activation helper'
 $source = @'
 using System;
 using System.Diagnostics;
@@ -744,20 +762,28 @@ $activationCompleted = $false
 $activationHResult = [int]0
 $activatedProcessId = [uint32]0
 try {
+    Write-CCActivation $activationStep 'started' @{}
     Add-Type -TypeDefinition $source -Language CSharp -ErrorAction Stop
+    Write-CCActivation $activationStep 'passed' @{}
+    $activationStep='create package controller'
     $controller = New-Object CodexLiveExplorerPackageGuard.PackageController
+    $activationStep='activate official Windows package'
+    Write-CCActivation $activationStep 'started' @{}
     $activation = [CodexLiveExplorerPackageGuard.Activator]::Activate(
         $env:CLE_PACKAGE_AUMID,
         $env:CLE_PACKAGE_ARGUMENTS)
     $activationHResult = [int]$activation.HResult
     $activatedProcessId = [uint32]$activation.ProcessId
     $activationCompleted = $true
+    Write-CCActivation $activationStep 'returned' @{hresult=$activationHResult;pid=$activatedProcessId}
+    $activationStep='open activated process handle'
     if ($activationHResult -ge 0 -and $activatedProcessId -ne 0) {
         $activatedProcess = [Diagnostics.Process]::GetProcessById([int]$activatedProcessId)
         $null = $activatedProcess.Handle
     }
 }
 catch {
+    Write-CCActivation $activationStep 'failed' @{exceptionType=$_.Exception.GetType().FullName;message=$_.Exception.Message;hresult=$_.Exception.HResult;category=$_.CategoryInfo.Category.ToString();fullyQualifiedErrorId=$_.FullyQualifiedErrorId;scriptLine=$_.InvocationInfo.ScriptLineNumber}
     if (-not $activationCompleted) {
         $activationHResult = [Runtime.InteropServices.Marshal]::GetHRForException($_.Exception)
         $activatedProcessId = [uint32]0
@@ -803,6 +829,7 @@ try {
                 $controlMessage = $line.Trim().ToLowerInvariant()
                 if ($controlMessage -eq 'arm') {
                     $armed = $true
+                    Write-CCActivation 'termination authorization' 'armed' @{pid=$activatedProcessId}
                 }
                 elseif ($controlMessage -eq 'terminate') {
                     if ($armed) {
@@ -830,6 +857,7 @@ try {
 
         if ($terminateRequested -and -not $terminationIssued) {
             $terminationHResult = [int]$controller.TerminateAllProcesses($packageFullName)
+            Write-CCActivation 'TerminateAllProcesses' 'returned' @{hresult=$terminationHResult}
             $terminationIssued = $true
             $terminationSucceeded = $terminationHResult -ge 0
             if (-not $terminationSucceeded) {
@@ -839,6 +867,7 @@ try {
         }
 
         if ($activatedProcess.HasExited) {
+            Write-CCActivation 'activation PID exit' 'observed' @{pid=$activatedProcessId;exitCode=$activatedProcess.ExitCode}
             $processExited = $true
             break
         }
@@ -846,6 +875,7 @@ try {
     }
 }
 catch {
+    Write-CCActivation 'package supervision' 'failed' @{exceptionType=$_.Exception.GetType().FullName;message=$_.Exception.Message;hresult=$_.Exception.HResult;scriptLine=$_.InvocationInfo.ScriptLineNumber}
     $monitorFailed = $true
 }
 finally {
@@ -1003,6 +1033,21 @@ pub fn verify_process_identity(
     launched_after: SystemTime,
     official_executable: &Path,
 ) -> Result<(), ProcessGuardError> {
+    let result = verify_process_identity_inner(pid, launched_after, official_executable);
+    crate::process_diagnostics::observe(
+        "process identity",
+        "Rust identity decision",
+        if result.is_ok() { "passed" } else { "failed" },
+        serde_json::json!({"port":Option::<u16>::None, "pid":Some(pid), "reason":result.as_ref().err().map(ToString::to_string), "securityChecksRequired":true}),
+    );
+    result
+}
+
+fn verify_process_identity_inner(
+    pid: u32,
+    launched_after: SystemTime,
+    official_executable: &Path,
+) -> Result<(), ProcessGuardError> {
     #[cfg(not(windows))]
     {
         let _ = (pid, launched_after, official_executable);
@@ -1034,45 +1079,22 @@ pub fn verify_process_identity(
             .as_millis()
             .try_into()
             .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
-        let powershell = trusted_powershell().ok_or_else(|| {
-            ProcessGuardError::Detailed("trusted System32 PowerShell was not found".into())
-        })?;
-        let output = StdCommand::new(powershell)
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                PROCESS_IDENTITY_SCRIPT,
-            ])
-            .env("CLE_CODEX_PID", pid.to_string())
-            .env(
-                "CLE_CODEX_LAUNCHED_AFTER_MILLIS",
-                launched_after_millis.to_string(),
-            )
-            .env("CLE_CODEX_EXE", official_executable.as_os_str())
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .map_err(|error| {
-                ProcessGuardError::Detailed(format!(
-                    "process identity query could not start: OS error {:?}",
-                    error.raw_os_error()
-                ))
-            })?;
-        if !output.status.success()
-            || output.stdout.is_empty()
-            || output.stdout.len() > MAX_IDENTITY_OUTPUT_BYTES
-        {
-            return Err(ProcessGuardError::Detailed(format!(
-                "process identity query failed: exit={:?}, stdout_bytes={} (limit {})",
-                output.status.code(),
-                output.stdout.len(),
-                MAX_IDENTITY_OUTPUT_BYTES
-            )));
-        }
+        let pid_input = pid.to_string();
+        let launch_input = launched_after_millis.to_string();
+        let output = diagnostic_query(
+            "process identity",
+            PROCESS_IDENTITY_SCRIPT,
+            &[
+                ("CLE_CODEX_PID", pid_input.as_ref()),
+                ("CLE_CODEX_LAUNCHED_AFTER_MILLIS", launch_input.as_ref()),
+                ("CLE_CODEX_EXE", official_executable.as_os_str()),
+            ],
+            MAX_IDENTITY_OUTPUT_BYTES,
+            None,
+            Some(pid),
+        )?;
         let snapshot: ProcessIdentitySnapshot =
-            serde_json::from_slice(&output.stdout).map_err(|error| {
+            serde_json::from_slice(&output).map_err(|error| {
                 ProcessGuardError::Detailed(format!(
                     "process identity response is invalid JSON: category={:?}, line={}, column={}",
                     error.classify(),
@@ -1131,9 +1153,57 @@ pub fn verify_process_identity(
 }
 
 #[cfg(windows)]
-const PROCESS_IDENTITY_SCRIPT: &str = "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false); $culture=[Globalization.CultureInfo]::InvariantCulture; $processId=[uint32]::Parse($env:CLE_CODEX_PID,$culture); $launchedAfter=[int64]::Parse($env:CLE_CODEX_LAUNCHED_AFTER_MILLIS,$culture); $process=Get-CimInstance Win32_Process -Filter ('ProcessId = '+$processId.ToString($culture)); if($null -eq $process -or $null -eq $process.ExecutablePath){throw 'process identity is unavailable'}; $actual=[IO.Path]::GetFullPath([string]$process.ExecutablePath); $target=[IO.Path]::GetFullPath($env:CLE_CODEX_EXE); $created=([DateTimeOffset]$process.CreationDate).ToUnixTimeMilliseconds(); [pscustomobject]@{ProcessId=[uint32]$process.ProcessId;CreationUnixMillis=[int64]$created;ExecutablePath=$actual;CreationMatches=($created -ge $launchedAfter);ExecutableMatches=$actual.Equals($target,[StringComparison]::OrdinalIgnoreCase)} | ConvertTo-Json -Compress";
+const PROCESS_IDENTITY_SCRIPT: &str = r#"
+$culture=[Globalization.CultureInfo]::InvariantCulture
+$processId=[uint32]::Parse($env:CLE_CODEX_PID,$culture)
+$launchedAfter=[int64]::Parse($env:CLE_CODEX_LAUNCHED_AFTER_MILLIS,$culture)
+$process=Invoke-CCStep 'Get-CimInstance Win32_Process (activation PID)' { Get-CimInstance Win32_Process -Filter ('ProcessId = '+$processId.ToString($culture)) }
+Write-CCObservation 'activation PID observation' 'observed' @{processPresent=($null -ne $process); executableAvailable=($null -ne $process.ExecutablePath)}
+Invoke-CCStep 'required activation fields' { if($null -eq $process -or $null -eq $process.ExecutablePath){throw 'process identity is unavailable'} }
+$actual=Invoke-CCStep 'normalize observed executable' { [IO.Path]::GetFullPath([string]$process.ExecutablePath) }
+$target=Invoke-CCStep 'normalize official executable' { [IO.Path]::GetFullPath($env:CLE_CODEX_EXE) }
+$created=Invoke-CCStep 'convert activation creation time' { ([DateTimeOffset]$process.CreationDate).ToUnixTimeMilliseconds() }
+Invoke-CCStep 'serialize process identity' { [pscustomobject]@{ProcessId=[uint32]$process.ProcessId;CreationUnixMillis=[int64]$created;ExecutablePath=$actual;CreationMatches=($created -ge $launchedAfter);ExecutableMatches=$actual.Equals($target,[StringComparison]::OrdinalIgnoreCase)} | ConvertTo-Json -Compress }
+"#;
+
+#[cfg(windows)]
+fn diagnostic_query(
+    operation: &str,
+    script: &str,
+    environment: &[(&str, &std::ffi::OsStr)],
+    limit: usize,
+    port: Option<u16>,
+    pid: Option<u32>,
+) -> Result<Vec<u8>, ProcessGuardError> {
+    let result = crate::process_diagnostics::query(
+        operation,
+        script,
+        environment,
+        limit,
+        serde_json::json!({"port":port,"launchedPid":pid}),
+    );
+    if result.is_err() {
+        crate::process_diagnostics::native_observation(operation, port, pid);
+    }
+    result
+}
 
 pub fn verify_listener_owner(
+    port: u16,
+    launched_pid: u32,
+    launched_after: SystemTime,
+) -> Result<(), ProcessGuardError> {
+    let result = verify_listener_owner_inner(port, launched_pid, launched_after);
+    crate::process_diagnostics::observe(
+        "listener ownership",
+        "Rust identity decision",
+        if result.is_ok() { "passed" } else { "failed" },
+        serde_json::json!({"port":Some(port), "pid":Some(launched_pid), "reason":result.as_ref().err().map(ToString::to_string), "securityChecksRequired":true}),
+    );
+    result
+}
+
+fn verify_listener_owner_inner(
     port: u16,
     launched_pid: u32,
     launched_after: SystemTime,
@@ -1147,37 +1217,15 @@ pub fn verify_listener_owner(
     {
         // Both interpolated values are integers created by this process. No
         // renderer or filesystem text enters the PowerShell program.
-        let script = ownership_script(port);
-        let powershell = trusted_powershell().ok_or_else(|| {
-            ProcessGuardError::Detailed(
-                "listener ownership query: trusted System32 PowerShell was not found".into(),
-            )
-        })?;
-        let output = StdCommand::new(powershell)
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                &script,
-            ])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .map_err(|error| {
-                ProcessGuardError::Detailed(format!(
-                    "listener ownership query could not start: port={port}, OS error {:?}",
-                    error.raw_os_error()
-                ))
-            })?;
-        if !output.status.success() || output.stdout.len() > 4 * 1024 * 1024 {
-            return Err(ProcessGuardError::Detailed(format!(
-                "listener ownership query failed: port={port}, exit={:?}, stdout_bytes={}",
-                output.status.code(),
-                output.stdout.len()
-            )));
-        }
-        let snapshot: OwnershipSnapshot = serde_json::from_slice(&output.stdout)
+        let output = diagnostic_query(
+            "listener ownership",
+            &ownership_script(port),
+            &[],
+            4 * 1024 * 1024,
+            Some(port),
+            Some(launched_pid),
+        )?;
+        let snapshot: OwnershipSnapshot = serde_json::from_slice(&output)
             .map_err(|error| ProcessGuardError::Detailed(format!("listener ownership response is invalid JSON: port={port}, category={:?}, line={}, column={}", error.classify(), error.line(), error.column())))?;
         let launched_after_millis = launched_after
             .duration_since(UNIX_EPOCH)
@@ -1185,6 +1233,12 @@ pub fn verify_listener_owner(
             .as_millis()
             .try_into()
             .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+        crate::process_diagnostics::observe(
+            "listener ownership",
+            "CIM snapshot",
+            "observed",
+            serde_json::json!({"snapshot":snapshot_observation(&snapshot, port, Some((launched_pid, launched_after_millis)), None)}),
+        );
         verify_snapshot(&snapshot, launched_pid, launched_after_millis).map_err(|error| {
             ProcessGuardError::Detailed(format!(
                 "{error}; {}",
@@ -1200,6 +1254,20 @@ pub fn verify_listener_owner(
 }
 
 pub fn verify_listener_executable(
+    port: u16,
+    official_executable: &Path,
+) -> Result<(), ProcessGuardError> {
+    let result = verify_listener_executable_inner(port, official_executable);
+    crate::process_diagnostics::observe(
+        "listener executable",
+        "Rust identity decision",
+        if result.is_ok() { "passed" } else { "failed" },
+        serde_json::json!({"port":Some(port), "pid":Option::<u32>::None, "reason":result.as_ref().err().map(ToString::to_string), "securityChecksRequired":true}),
+    );
+    result
+}
+
+fn verify_listener_executable_inner(
     port: u16,
     official_executable: &Path,
 ) -> Result<(), ProcessGuardError> {
@@ -1221,37 +1289,22 @@ pub fn verify_listener_executable(
                 "canonical official executable is not a file".into(),
             ));
         }
-        let powershell = trusted_powershell().ok_or_else(|| {
-            ProcessGuardError::Detailed(
-                "listener executable query: trusted System32 PowerShell was not found".into(),
-            )
-        })?;
-        let output = StdCommand::new(powershell)
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                &ownership_script(port),
-            ])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .map_err(|error| {
-                ProcessGuardError::Detailed(format!(
-                    "listener executable query could not start: port={port}, OS error {:?}",
-                    error.raw_os_error()
-                ))
-            })?;
-        if !output.status.success() || output.stdout.len() > 4 * 1024 * 1024 {
-            return Err(ProcessGuardError::Detailed(format!(
-                "listener executable query failed: port={port}, exit={:?}, stdout_bytes={}",
-                output.status.code(),
-                output.stdout.len()
-            )));
-        }
-        let snapshot: OwnershipSnapshot = serde_json::from_slice(&output.stdout)
+        let output = diagnostic_query(
+            "listener executable",
+            &ownership_script(port),
+            &[],
+            4 * 1024 * 1024,
+            Some(port),
+            None,
+        )?;
+        let snapshot: OwnershipSnapshot = serde_json::from_slice(&output)
             .map_err(|error| ProcessGuardError::Detailed(format!("listener executable response is invalid JSON: port={port}, category={:?}, line={}, column={}", error.classify(), error.line(), error.column())))?;
+        crate::process_diagnostics::observe(
+            "listener executable",
+            "CIM snapshot",
+            "observed",
+            serde_json::json!({"snapshot":snapshot_observation(&snapshot, port, None, Some(&official_executable))}),
+        );
         verify_snapshot_executable(&snapshot, &official_executable).map_err(|error| {
             ProcessGuardError::Detailed(format!(
                 "{error}; {}",
@@ -1289,34 +1342,23 @@ pub fn discover_listener_port(
     #[cfg(windows)]
     {
         const MAX_OUTPUT_BYTES: usize = 256 * 1024;
-        const SCRIPT: &str = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $items=@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.CommandLine -and $_.CommandLine -match '(?i)(^|\s)--remote-debugging-port(?:=|\s+)' } | Select-Object ExecutablePath,CommandLine); [pscustomobject]@{Candidates=$items} | ConvertTo-Json -Compress -Depth 3"#;
+        const SCRIPT: &str = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $script:ccStep='Get-CimInstance (debugging port discovery)'; Write-CCObservation $script:ccStep 'started' @{}; $items=@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.CommandLine -and $_.CommandLine -match '(?i)(^|\s)--remote-debugging-port(?:=|\s+)' } | Select-Object ExecutablePath,CommandLine); [pscustomobject]@{Candidates=$items} | ConvertTo-Json -Compress -Depth 3"#;
 
         let official_executable = dunce::canonicalize(official_executable)
             .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
         if !official_executable.is_file() {
             return Err(ProcessGuardError::OwnershipUnknown);
         }
-        let powershell = trusted_powershell().ok_or(ProcessGuardError::OwnershipUnknown)?;
-        let output = StdCommand::new(powershell)
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                SCRIPT,
-            ])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
-        if !output.status.success()
-            || output.stdout.is_empty()
-            || output.stdout.len() > MAX_OUTPUT_BYTES
-        {
-            return Err(ProcessGuardError::OwnershipUnknown);
-        }
-        let snapshot: DebugListenerCandidates = serde_json::from_slice(&output.stdout)
-            .map_err(|_| ProcessGuardError::OwnershipUnknown)?;
+        let output = diagnostic_query(
+            "listener discovery",
+            SCRIPT,
+            &[],
+            MAX_OUTPUT_BYTES,
+            None,
+            None,
+        )?;
+        let snapshot: DebugListenerCandidates =
+            serde_json::from_slice(&output).map_err(|_| ProcessGuardError::OwnershipUnknown)?;
         let expected = official_executable.to_string_lossy().to_lowercase();
         let mut candidate_ports = HashSet::new();
         for candidate in snapshot.candidates {
@@ -1375,7 +1417,14 @@ fn command_line_switch<'a>(command_line: &'a str, name: &str) -> Option<&'a str>
 #[cfg(windows)]
 fn ownership_script(port: u16) -> String {
     format!(
-        "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new(); $l=@(Get-NetTCPConnection -State Listen -LocalPort {port} | Where-Object {{ $_.LocalAddress -eq '127.0.0.1' -or $_.LocalAddress -eq '::1' }} | Select-Object -ExpandProperty OwningProcess -Unique); $p=@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,ExecutablePath,@{{Name='CreationUnixMillis';Expression={{([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds()}}}}); [pscustomobject]@{{Listeners=$l;Processes=$p}} | ConvertTo-Json -Compress -Depth 4"
+        r#"
+$l=@(Invoke-CCStep 'Get-NetTCPConnection (loopback listener)' {{ Get-NetTCPConnection -State Listen -LocalPort {port} | Where-Object {{ $_.LocalAddress -eq '127.0.0.1' -or $_.LocalAddress -eq '::1' }} | Select-Object -ExpandProperty OwningProcess -Unique }})
+Write-CCObservation 'listener PID observation' 'observed' @{{port={port}; listenerCount=$l.Count; listenerPids=$l}}
+$records=@(Invoke-CCStep 'Get-CimInstance Win32_Process (process snapshot)' {{ Get-CimInstance Win32_Process }})
+Write-CCObservation 'process snapshot observation' 'observed' @{{processRecordCount=$records.Count}}
+$p=@(Invoke-CCStep 'convert process creation times' {{ $records | Select-Object ProcessId,ParentProcessId,ExecutablePath,@{{Name='CreationUnixMillis';Expression={{([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds()}}}} }})
+Invoke-CCStep 'serialize ownership snapshot' {{ [pscustomobject]@{{Listeners=$l;Processes=$p}} | ConvertTo-Json -Compress -Depth 4 }}
+"#
     )
 }
 
@@ -1397,27 +1446,21 @@ pub fn is_executable_running(executable: &Path) -> Result<bool, ProcessGuardErro
         // compatibility checks
         // checks has a private, recognisable user-data marker and must not
         // block a normal launch if its parent was orphaned.
-        const SCRIPT: &str = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); function should_count_process([string]$commandLine) { if ([string]::IsNullOrWhiteSpace($commandLine)) { return $true }; if ($commandLine -match '(?i)CodeCodexOfficialProbe-') { return $false }; return $commandLine -notmatch '(?i)(^|\s)--type(?:=|\s+)[\"'']?(?:renderer|gpu-process|utility|crashpad-handler|zygote|sandbox-helper|broker|ppapi)[\"'']?(?=\s|$)' }; $target=[IO.Path]::GetFullPath($env:CLE_CODEX_EXE); $count=@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath).Equals($target,[StringComparison]::OrdinalIgnoreCase) -and (should_count_process ([string]$_.CommandLine)) }).Count; [Console]::Write($count.ToString([Globalization.CultureInfo]::InvariantCulture))"#;
+        const SCRIPT: &str = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); function should_count_process([string]$commandLine) { if ([string]::IsNullOrWhiteSpace($commandLine)) { return $true }; if ($commandLine -match '(?i)CodeCodexOfficialProbe-') { return $false }; return $commandLine -notmatch '(?i)(^|\s)--type(?:=|\s+)[\"'']?(?:renderer|gpu-process|utility|crashpad-handler|zygote|sandbox-helper|broker|ppapi)[\"'']?(?=\s|$)' }; $target=[IO.Path]::GetFullPath($env:CLE_CODEX_EXE); $script:ccStep='Get-CimInstance (existing official process)'; Write-CCObservation $script:ccStep 'started' @{}; $count=@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath).Equals($target,[StringComparison]::OrdinalIgnoreCase) -and (should_count_process ([string]$_.CommandLine)) }).Count; [Console]::Write($count.ToString([Globalization.CultureInfo]::InvariantCulture))"#;
         let executable = dunce::canonicalize(executable)
             .map_err(|_| ProcessGuardError::ProcessInspectionUnknown)?;
         if !executable.is_file() {
             return Err(ProcessGuardError::ProcessInspectionUnknown);
         }
-        let powershell = trusted_powershell().ok_or(ProcessGuardError::ProcessInspectionUnknown)?;
-        let output = StdCommand::new(powershell)
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                SCRIPT,
-            ])
-            .env("CLE_CODEX_EXE", executable.as_os_str())
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .map_err(|_| ProcessGuardError::ProcessInspectionUnknown)?;
-        parse_running_query_result(output.status.success(), &output.stdout)
+        let output = diagnostic_query(
+            "existing process",
+            SCRIPT,
+            &[("CLE_CODEX_EXE", executable.as_os_str())],
+            4096,
+            None,
+            None,
+        )?;
+        parse_running_query_result(true, &output)
     }
 }
 
@@ -2065,6 +2108,7 @@ mod tests {
             control,
             pid: activated_pid,
             armed: true,
+            stderr_reader: None,
         }));
 
         let started = std::time::Instant::now();

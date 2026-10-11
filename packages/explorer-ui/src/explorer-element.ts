@@ -143,7 +143,7 @@ import { STARTUP_BACKGROUNDS, mountStartupBackground } from './startup-backgroun
 import { loadStartupVideo, removeStartupVideo, saveStartupVideo, type StartupVideo } from "./startup-transition-facade";
 import { observePluginControls } from "./runtime-information";
 import { runtimeEvent, runtimeTaskLabel } from "./runtime-events";
-import { beginRuntimeOperation, runtimeErrorDetails } from "./runtime-operations";
+import { beginRuntimeOperation, runtimeErrorDetails, recordCaughtRuntimeError } from "./runtime-operations";
 import { clipFadeOpacity, formatTimelineTime, moveTimelineBoundary, sampleStartupVideoFrames, startupTimelineGeometry } from "./startup-transition-facade";
 import { activePageElements, MAIN_SURFACE_SELECTOR } from "./adapters/codex-26.715";
 import { usesClippedMainLayout } from "./adapters/codex-layout-version";
@@ -477,6 +477,7 @@ interface UpdateCheckResult {
 interface UpdateInstallResult {
   readonly latestVersion: string;
   readonly launched: boolean;
+  readonly windowReady: boolean;
 }
 
 interface GitCommitSummary {
@@ -1074,7 +1075,9 @@ function particleMorphCurvesMatch(first: ParticleMorphCurve, second: ParticleMor
 function writeBlackHoleBackgroundSettings(settings: BlackHoleBackgroundSettings): void {
   try {
     localStorage.setItem(BLACK_HOLE_BACKGROUND_SETTINGS_KEY, JSON.stringify(settings));
-  } catch {
+  } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("writeBlackHoleBackgroundSettings", __codeCodexCaught);
+
     // The current session keeps working when DOM storage is unavailable.
   }
 }
@@ -1082,7 +1085,9 @@ function writeBlackHoleBackgroundSettings(settings: BlackHoleBackgroundSettings)
 function writeGlowHorizonBackgroundSettings(settings: GlowHorizonBackgroundSettings): void {
   try {
     localStorage.setItem(GLOW_HORIZON_BACKGROUND_SETTINGS_KEY, JSON.stringify(settings));
-  } catch {
+  } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("writeGlowHorizonBackgroundSettings", __codeCodexCaught);
+
     // The current session keeps working when DOM storage is unavailable.
   }
 }
@@ -1090,7 +1095,9 @@ function writeGlowHorizonBackgroundSettings(settings: GlowHorizonBackgroundSetti
 function writeHeavenlyCloudBackgroundSettings(settings: HeavenlyCloudBackgroundSettings): void {
   try {
     localStorage.setItem(HEAVENLY_CLOUD_BACKGROUND_SETTINGS_KEY, JSON.stringify(settings));
-  } catch {
+  } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("writeHeavenlyCloudBackgroundSettings", __codeCodexCaught);
+
     // The current session keeps working when DOM storage is unavailable.
   }
 }
@@ -1098,7 +1105,9 @@ function writeHeavenlyCloudBackgroundSettings(settings: HeavenlyCloudBackgroundS
 function writeAuroraIonosphereBackgroundSettings(settings: AuroraIonosphereBackgroundSettings): void {
   try {
     localStorage.setItem(AURORA_IONOSPHERE_BACKGROUND_SETTINGS_KEY, JSON.stringify(settings));
-  } catch {
+  } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("writeAuroraIonosphereBackgroundSettings", __codeCodexCaught);
+
     // The current session keeps working when DOM storage is unavailable.
   }
 }
@@ -1121,7 +1130,9 @@ function findCodexAppInitialModule(): string | undefined {
   return candidates.find((candidate) => {
     try {
       return /\/app-initial-[^/]+\.js$/.test(new URL(candidate, location.href).pathname);
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("findCodexAppInitialModule", __codeCodexCaught);
+
       return false;
     }
   });
@@ -1216,7 +1227,9 @@ function readParticleThemeLease(): ParticleThemeLease | undefined {
         ? { owner, previousPreference: lease.previousPreference, forcedPreference: "dark" }
         : { previousPreference: lease.previousPreference, forcedPreference: "dark" };
     }
-  } catch {
+  } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("readParticleThemeLease", __codeCodexCaught);
+
     // Invalid or inaccessible storage is handled as an absent lease.
   }
   return undefined;
@@ -1225,7 +1238,9 @@ function readParticleThemeLease(): ParticleThemeLease | undefined {
 function writeParticleThemeLease(lease: ParticleThemeLease): void {
   try {
     localStorage.setItem(PARTICLE_BACKGROUND_THEME_LEASE_KEY, JSON.stringify(lease));
-  } catch {
+  } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("writeParticleThemeLease", __codeCodexCaught);
+
     throw new Error("Code-Codex could not remember the current Appearance setting");
   }
 }
@@ -1249,7 +1264,9 @@ function clearParticleThemeLease(owner?: DarkBackgroundPluginId): void {
     const lease = readParticleThemeLease();
     if (owner && lease?.owner && lease.owner !== owner) return;
     localStorage.removeItem(PARTICLE_BACKGROUND_THEME_LEASE_KEY);
-  } catch {
+  } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("clearParticleThemeLease", __codeCodexCaught);
+
     // The setting bridge still owns the authoritative theme preference.
   }
 }
@@ -1536,6 +1553,8 @@ class ParticleBackgroundController {
         });
         registerBackgroundOpening(layer, this.#renderer);
       } catch (error) {
+      recordCaughtRuntimeError("#performEnable", error);
+
         this.#error = error instanceof Error ? `${error.message}; showing the source image only.` : "WebGL is unavailable; showing the source image only.";
       }
       document.documentElement.toggleAttribute(PARTICLE_BACKGROUND_ATTRIBUTE, true);
@@ -1553,11 +1572,15 @@ class ParticleBackgroundController {
         this.#scheduleRotation();
       }
     } catch (error) {
+      recordCaughtRuntimeError("#performEnable", error);
+
       this.#error = error instanceof Error ? error.message : "Particle Image Background could not be enabled";
       this.#teardownPresentation();
       try {
         await this.#restoreCodexAppearanceTheme();
-      } catch {
+      } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#performEnable", __codeCodexCaught);
+
         // Keep the original activation error. A retained lease retries restoration later.
       }
       throw error;
@@ -1580,6 +1603,8 @@ class ParticleBackgroundController {
       if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
       this.#error = undefined;
     } catch (error) {
+      recordCaughtRuntimeError("disable", error);
+
       this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
     }
     this.#notify();
@@ -1658,6 +1683,8 @@ class ParticleBackgroundController {
           imported.push(record);
           totalBytes += file.size;
         } catch (error) {
+      recordCaughtRuntimeError("addImages", error);
+
           this.#error = error instanceof Error ? `${file.name}: ${error.message}` : `${file.name} could not be saved.`;
         }
       }
@@ -1738,6 +1765,8 @@ class ParticleBackgroundController {
       this.previewImageTransform(id, transform);
       this.#imageTransformSaveError = undefined;
     } catch (error) {
+      recordCaughtRuntimeError("updateImageTransform", error);
+
       this.previewImageTransform(id, record);
       this.#imageTransformSaveError = error instanceof Error ? error.message : "The photo framing could not be saved";
     }
@@ -1780,6 +1809,8 @@ class ParticleBackgroundController {
         this.#scheduleRotation();
       }
     } catch (error) {
+      recordCaughtRuntimeError("deleteImage", error);
+
       this.#error = error instanceof Error ? error.message : "The image could not be deleted";
     } finally {
       this.#pending = false;
@@ -1825,6 +1856,8 @@ class ParticleBackgroundController {
         .slice(0, PARTICLE_BACKGROUND_MAX_IMAGES);
       void navigator.storage?.persist?.().catch(() => false);
     } catch (error) {
+      recordCaughtRuntimeError("#initialize", error);
+
       this.#database = null;
       this.#error = "The image library is available for this session only.";
       console.warn("Code-Codex particle image storage is unavailable", error);
@@ -1872,6 +1905,8 @@ class ParticleBackgroundController {
       activated = true;
       return true;
     } catch (error) {
+      recordCaughtRuntimeError("#activateImage", error);
+
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         this.#error = error instanceof Error ? error.message : "The particle image could not be loaded";
       }
@@ -1900,6 +1935,8 @@ class ParticleBackgroundController {
       decoder.src = nextUrl;
       await decoder.decode();
     } catch (error) {
+      recordCaughtRuntimeError("#prepareSourceImage", error);
+
       URL.revokeObjectURL(nextUrl);
       throw new Error("The processed particle image could not be decoded", { cause: error });
     }
@@ -2043,7 +2080,9 @@ class ParticleBackgroundController {
           this.#updateSourceTransition(this.#sourceTransitionProgress, false);
         });
         registerBackgroundOpening(this.#canvas, this.#renderer);
-      } catch {
+      } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#clearActiveImage", __codeCodexCaught);
+
         this.#renderer = undefined;
       }
     }
@@ -2154,6 +2193,8 @@ class ParticleBackgroundController {
     try {
       current = await readCodexAppearanceTheme();
     } catch (error) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
       if (codexDarkThemeApplied()) return;
       throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
     }
@@ -2184,10 +2225,14 @@ class ParticleBackgroundController {
       await writeCodexAppearanceTheme("dark");
       await waitForCodexDarkTheme();
     } catch (error) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
       try {
         await writeCodexAppearanceTheme(current);
         clearParticleThemeLease(owner);
-      } catch {
+      } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", __codeCodexCaught);
+
         // Retain the lease so a later disable/startup can retry restoration.
       }
       throw new Error("Codex could not switch to Dark automatically.", { cause: error });
@@ -2240,7 +2285,9 @@ class ParticleBackgroundController {
         this.#stopForExternalThemeChange();
         return;
       }
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#checkCodexThemePreference", __codeCodexCaught);
+
       // A transient read failure must not tear down an active presentation.
     }
     if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
@@ -2290,7 +2337,9 @@ function getParticleBackgroundController(): ParticleBackgroundController {
   if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
     try {
       existing.dispose();
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("getParticleBackgroundController", __codeCodexCaught);
+
       // Replace a stale controller from an earlier injected bundle.
     }
   }
@@ -2370,9 +2419,13 @@ class GlowHorizonBackgroundController {
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
     } catch (error) {
+      recordCaughtRuntimeError("#performEnable", error);
+
       this.#error = error instanceof Error ? error.message : "Glow Horizon Background could not be enabled";
       this.#teardownPresentation();
-      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Keep activation error. */ }
+      try { await this.#restoreCodexAppearanceTheme(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#performEnable", __codeCodexCaught);
+ /* Keep activation error. */ }
       throw error;
     } finally {
       this.#pending = false;
@@ -2393,6 +2446,8 @@ class GlowHorizonBackgroundController {
       if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
       this.#error = undefined;
     } catch (error) {
+      recordCaughtRuntimeError("disable", error);
+
       this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
     }
     this.#notify();
@@ -2438,6 +2493,8 @@ class GlowHorizonBackgroundController {
     let current: CodexAppearanceTheme;
     try { current = await readCodexAppearanceTheme(); }
     catch (error) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
       if (codexDarkThemeApplied()) return;
       throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
     }
@@ -2460,7 +2517,11 @@ class GlowHorizonBackgroundController {
       await writeCodexAppearanceTheme("dark");
       await waitForCodexDarkTheme();
     } catch (error) {
-      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", __codeCodexCaught);
+ /* Retain lease for retry. */ }
       throw new Error("Codex could not switch to Dark automatically.", { cause: error });
     }
   }
@@ -2501,7 +2562,9 @@ class GlowHorizonBackgroundController {
       const preference = await readCodexAppearanceTheme();
       if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
       if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
-    } catch { /* Transient bridge failure does not tear down presentation. */ }
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#checkCodexThemePreference", __codeCodexCaught);
+ /* Transient bridge failure does not tear down presentation. */ }
     if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
   }
 
@@ -2528,7 +2591,9 @@ function getGlowHorizonBackgroundController(): GlowHorizonBackgroundController {
   const existing = globalState[GLOW_HORIZON_BACKGROUND_CONTROLLER];
   if (existing instanceof GlowHorizonBackgroundController) return existing;
   if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
-    try { existing.dispose(); } catch { /* Replace stale controller. */ }
+    try { existing.dispose(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("getGlowHorizonBackgroundController", __codeCodexCaught);
+ /* Replace stale controller. */ }
   }
   const controller = new GlowHorizonBackgroundController();
   globalState[GLOW_HORIZON_BACKGROUND_CONTROLLER] = controller;
@@ -2612,9 +2677,13 @@ class HeavenlyCloudBackgroundController {
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
     } catch (error) {
+      recordCaughtRuntimeError("#performEnable", error);
+
       this.#error = error instanceof Error ? error.message : "Heavenly Cloud Background could not be enabled";
       this.#teardownPresentation();
-      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Retain the activation error. */ }
+      try { await this.#restoreCodexAppearanceTheme(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#performEnable", __codeCodexCaught);
+ /* Retain the activation error. */ }
       throw error;
     } finally {
       this.#pending = false;
@@ -2635,6 +2704,8 @@ class HeavenlyCloudBackgroundController {
       if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
       this.#error = undefined;
     } catch (error) {
+      recordCaughtRuntimeError("disable", error);
+
       this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
     }
     this.#notify();
@@ -2691,6 +2762,8 @@ class HeavenlyCloudBackgroundController {
     let current: CodexAppearanceTheme;
     try { current = await readCodexAppearanceTheme(); }
     catch (error) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
       if (codexDarkThemeApplied()) return;
       throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
     }
@@ -2713,7 +2786,11 @@ class HeavenlyCloudBackgroundController {
       await writeCodexAppearanceTheme("dark");
       await waitForCodexDarkTheme();
     } catch (error) {
-      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", __codeCodexCaught);
+ /* Retain lease for retry. */ }
       throw new Error("Codex could not switch to Dark automatically.", { cause: error });
     }
   }
@@ -2754,7 +2831,9 @@ class HeavenlyCloudBackgroundController {
       const preference = await readCodexAppearanceTheme();
       if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
       if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
-    } catch { /* A transient read failure does not tear down the presentation. */ }
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#checkCodexThemePreference", __codeCodexCaught);
+ /* A transient read failure does not tear down the presentation. */ }
     if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
   }
 
@@ -2781,7 +2860,9 @@ function getHeavenlyCloudBackgroundController(): HeavenlyCloudBackgroundControll
   const existing = globalState[HEAVENLY_CLOUD_BACKGROUND_CONTROLLER];
   if (existing instanceof HeavenlyCloudBackgroundController) return existing;
   if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
-    try { existing.dispose(); } catch { /* Replace a stale controller. */ }
+    try { existing.dispose(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("getHeavenlyCloudBackgroundController", __codeCodexCaught);
+ /* Replace a stale controller. */ }
   }
   const controller = new HeavenlyCloudBackgroundController();
   globalState[HEAVENLY_CLOUD_BACKGROUND_CONTROLLER] = controller;
@@ -2861,9 +2942,13 @@ class AuroraIonosphereBackgroundController {
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
     } catch (error) {
+      recordCaughtRuntimeError("#performEnable", error);
+
       this.#error = error instanceof Error ? error.message : "Aurora Ionosphere Background could not be enabled";
       this.#teardownPresentation();
-      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Retain the activation error. */ }
+      try { await this.#restoreCodexAppearanceTheme(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#performEnable", __codeCodexCaught);
+ /* Retain the activation error. */ }
       throw error;
     } finally {
       this.#pending = false;
@@ -2884,6 +2969,8 @@ class AuroraIonosphereBackgroundController {
       if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
       this.#error = undefined;
     } catch (error) {
+      recordCaughtRuntimeError("disable", error);
+
       this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
     }
     this.#notify();
@@ -2928,6 +3015,8 @@ class AuroraIonosphereBackgroundController {
     let current: CodexAppearanceTheme;
     try { current = await readCodexAppearanceTheme(); }
     catch (error) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
       if (codexDarkThemeApplied()) return;
       throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
     }
@@ -2950,7 +3039,11 @@ class AuroraIonosphereBackgroundController {
       await writeCodexAppearanceTheme("dark");
       await waitForCodexDarkTheme();
     } catch (error) {
-      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", __codeCodexCaught);
+ /* Retain lease for retry. */ }
       throw new Error("Codex could not switch to Dark automatically.", { cause: error });
     }
   }
@@ -2988,7 +3081,9 @@ class AuroraIonosphereBackgroundController {
       const preference = await readCodexAppearanceTheme();
       if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
       if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
-    } catch { /* A transient read failure does not tear down the presentation. */ }
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#checkCodexThemePreference", __codeCodexCaught);
+ /* A transient read failure does not tear down the presentation. */ }
     if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
   }
   #stopForExternalThemeChange(): void {
@@ -3013,7 +3108,9 @@ function getAuroraIonosphereBackgroundController(): AuroraIonosphereBackgroundCo
   const existing = globalState[AURORA_IONOSPHERE_BACKGROUND_CONTROLLER];
   if (existing instanceof AuroraIonosphereBackgroundController) return existing;
   if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
-    try { existing.dispose(); } catch { /* Replace a stale controller. */ }
+    try { existing.dispose(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("getAuroraIonosphereBackgroundController", __codeCodexCaught);
+ /* Replace a stale controller. */ }
   }
   const controller = new AuroraIonosphereBackgroundController();
   globalState[AURORA_IONOSPHERE_BACKGROUND_CONTROLLER] = controller;
@@ -3021,7 +3118,9 @@ function getAuroraIonosphereBackgroundController(): AuroraIonosphereBackgroundCo
 }
 type MilkyWayControlGroup = "field" | "opening";
 function writeMilkyWayBackgroundSettings(settings: MilkyWayBackgroundSettings): void {
-  try { localStorage.setItem(MILKY_WAY_BACKGROUND_SETTINGS_KEY, JSON.stringify(settings)); } catch { /* Session settings remain usable. */ }
+  try { localStorage.setItem(MILKY_WAY_BACKGROUND_SETTINGS_KEY, JSON.stringify(settings)); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("writeMilkyWayBackgroundSettings", __codeCodexCaught);
+ /* Session settings remain usable. */ }
 }
 
 class MilkyWayBackgroundController {
@@ -3097,9 +3196,13 @@ class MilkyWayBackgroundController {
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
     } catch (error) {
+      recordCaughtRuntimeError("#performEnable", error);
+
       this.#error = error instanceof Error ? error.message : "Milky Way Background could not be enabled";
       this.#teardownPresentation();
-      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Retain the activation error. */ }
+      try { await this.#restoreCodexAppearanceTheme(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#performEnable", __codeCodexCaught);
+ /* Retain the activation error. */ }
       throw error;
     } finally {
       this.#pending = false;
@@ -3120,6 +3223,8 @@ class MilkyWayBackgroundController {
       if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
       this.#error = undefined;
     } catch (error) {
+      recordCaughtRuntimeError("disable", error);
+
       this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
     }
     this.#notify();
@@ -3164,6 +3269,8 @@ class MilkyWayBackgroundController {
     let current: CodexAppearanceTheme;
     try { current = await readCodexAppearanceTheme(); }
     catch (error) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
       if (codexDarkThemeApplied()) return;
       throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
     }
@@ -3186,7 +3293,11 @@ class MilkyWayBackgroundController {
       await writeCodexAppearanceTheme("dark");
       await waitForCodexDarkTheme();
     } catch (error) {
-      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", __codeCodexCaught);
+ /* Retain lease for retry. */ }
       throw new Error("Codex could not switch to Dark automatically.", { cause: error });
     }
   }
@@ -3224,7 +3335,9 @@ class MilkyWayBackgroundController {
       const preference = await readCodexAppearanceTheme();
       if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
       if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
-    } catch { /* A transient read failure does not tear down the presentation. */ }
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#checkCodexThemePreference", __codeCodexCaught);
+ /* A transient read failure does not tear down the presentation. */ }
     if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
   }
   #stopForExternalThemeChange(): void {
@@ -3249,14 +3362,18 @@ function getMilkyWayBackgroundController(): MilkyWayBackgroundController {
   const existing = globalState[MILKY_WAY_BACKGROUND_CONTROLLER];
   if (existing instanceof MilkyWayBackgroundController) return existing;
   if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
-    try { existing.dispose(); } catch { /* Replace a stale controller. */ }
+    try { existing.dispose(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("getMilkyWayBackgroundController", __codeCodexCaught);
+ /* Replace a stale controller. */ }
   }
   const controller = new MilkyWayBackgroundController();
   globalState[MILKY_WAY_BACKGROUND_CONTROLLER] = controller;
   return controller;
 }
 function writeMountainBackgroundSettings(settings: MountainSettings): void {
-  try { localStorage.setItem("code-codex:mountain-settings:v1",JSON.stringify(settings)); } catch { /* Keep session settings. */ }
+  try { localStorage.setItem("code-codex:mountain-settings:v1",JSON.stringify(settings)); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("writeMountainBackgroundSettings", __codeCodexCaught);
+ /* Keep session settings. */ }
 }
 class MountainBackgroundController {
   readonly #listeners = new Set<() => void>();
@@ -3331,9 +3448,13 @@ class MountainBackgroundController {
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
     } catch (error) {
+      recordCaughtRuntimeError("#performEnable", error);
+
       this.#error = error instanceof Error ? error.message : "Layered Mountain Background could not be enabled";
       this.#teardownPresentation();
-      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Retain the activation error. */ }
+      try { await this.#restoreCodexAppearanceTheme(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#performEnable", __codeCodexCaught);
+ /* Retain the activation error. */ }
       throw error;
     } finally {
       this.#pending = false;
@@ -3354,6 +3475,8 @@ class MountainBackgroundController {
       if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
       this.#error = undefined;
     } catch (error) {
+      recordCaughtRuntimeError("disable", error);
+
       this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
     }
     this.#notify();
@@ -3398,6 +3521,8 @@ class MountainBackgroundController {
     let current: CodexAppearanceTheme;
     try { current = await readCodexAppearanceTheme(); }
     catch (error) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
       if (codexDarkThemeApplied()) return;
       throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
     }
@@ -3420,7 +3545,11 @@ class MountainBackgroundController {
       await writeCodexAppearanceTheme("dark");
       await waitForCodexDarkTheme();
     } catch (error) {
-      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", __codeCodexCaught);
+ /* Retain lease for retry. */ }
       throw new Error("Codex could not switch to Dark automatically.", { cause: error });
     }
   }
@@ -3458,7 +3587,9 @@ class MountainBackgroundController {
       const preference = await readCodexAppearanceTheme();
       if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
       if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
-    } catch { /* A transient read failure does not tear down the presentation. */ }
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#checkCodexThemePreference", __codeCodexCaught);
+ /* A transient read failure does not tear down the presentation. */ }
     if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
   }
   #stopForExternalThemeChange(): void {
@@ -3483,7 +3614,9 @@ function getMountainBackgroundController(): MountainBackgroundController {
   const existing = globalState[MOUNTAIN_BACKGROUND_CONTROLLER];
   if (existing instanceof MountainBackgroundController) return existing;
   if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
-    try { existing.dispose(); } catch { /* Replace a stale controller. */ }
+    try { existing.dispose(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("getMountainBackgroundController", __codeCodexCaught);
+ /* Replace a stale controller. */ }
   }
   const controller = new MountainBackgroundController();
   globalState[MOUNTAIN_BACKGROUND_CONTROLLER] = controller;
@@ -3492,7 +3625,9 @@ function getMountainBackgroundController(): MountainBackgroundController {
 type BlinkingSquaresNumericKey = (typeof BLINKING_SQUARES_CONTROLS)[number][0];
 function writeBlinkingSquaresBackgroundSettings(settings: BlinkingSquaresSettings): void {
   try { localStorage.setItem(BLINKING_SQUARES_BACKGROUND_SETTINGS_KEY, JSON.stringify(settings)); }
-  catch { /* Keep session settings usable. */ }
+  catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("writeBlinkingSquaresBackgroundSettings", __codeCodexCaught);
+ /* Keep session settings usable. */ }
 }
 
 class BlinkingSquaresBackgroundController {
@@ -3563,9 +3698,13 @@ class BlinkingSquaresBackgroundController {
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
     } catch (error) {
+      recordCaughtRuntimeError("#performEnable", error);
+
       this.#error = error instanceof Error ? error.message : "Blinking Squares Background could not be enabled";
       this.#teardownPresentation();
-      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Retain the activation error. */ }
+      try { await this.#restoreCodexAppearanceTheme(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#performEnable", __codeCodexCaught);
+ /* Retain the activation error. */ }
       throw error;
     } finally {
       this.#pending = false;
@@ -3586,6 +3725,8 @@ class BlinkingSquaresBackgroundController {
       if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
       this.#error = undefined;
     } catch (error) {
+      recordCaughtRuntimeError("disable", error);
+
       this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
     }
     this.#notify();
@@ -3631,6 +3772,8 @@ class BlinkingSquaresBackgroundController {
     let current: CodexAppearanceTheme;
     try { current = await readCodexAppearanceTheme(); }
     catch (error) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
       if (codexDarkThemeApplied()) return;
       throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
     }
@@ -3653,7 +3796,11 @@ class BlinkingSquaresBackgroundController {
       await writeCodexAppearanceTheme("dark");
       await waitForCodexDarkTheme();
     } catch (error) {
-      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", __codeCodexCaught);
+ /* Retain lease for retry. */ }
       throw new Error("Codex could not switch to Dark automatically.", { cause: error });
     }
   }
@@ -3691,7 +3838,9 @@ class BlinkingSquaresBackgroundController {
       const preference = await readCodexAppearanceTheme();
       if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
       if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
-    } catch { /* A transient read failure does not tear down the presentation. */ }
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#checkCodexThemePreference", __codeCodexCaught);
+ /* A transient read failure does not tear down the presentation. */ }
     if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
   }
   #stopForExternalThemeChange(): void {
@@ -3716,13 +3865,17 @@ function getBlinkingSquaresBackgroundController(): BlinkingSquaresBackgroundCont
   const existing = globalState[BLINKING_SQUARES_BACKGROUND_CONTROLLER];
   if (existing instanceof BlinkingSquaresBackgroundController) return existing;
   if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
-    try { existing.dispose(); } catch { /* Replace a stale controller. */ }
+    try { existing.dispose(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("getBlinkingSquaresBackgroundController", __codeCodexCaught);
+ /* Replace a stale controller. */ }
   }
   const controller = new BlinkingSquaresBackgroundController();
   globalState[BLINKING_SQUARES_BACKGROUND_CONTROLLER] = controller;
   return controller;
 }
-function writeCloudTrainBackgroundSettings(s:CloudTrainSettings):void {try{localStorage.setItem("code-codex:cloud-train-settings:v1",JSON.stringify(s));}catch{/* Session settings remain usable. */}}
+function writeCloudTrainBackgroundSettings(s:CloudTrainSettings):void {try{localStorage.setItem("code-codex:cloud-train-settings:v1",JSON.stringify(s));}catch (__codeCodexCaught){
+      recordCaughtRuntimeError("writeCloudTrainBackgroundSettings", __codeCodexCaught);
+/* Session settings remain usable. */}}
 class CloudTrainBackgroundController {
   readonly #listeners = new Set<() => void>();
   #settings = readCloudTrainBackgroundSettings();
@@ -3796,9 +3949,13 @@ class CloudTrainBackgroundController {
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
     } catch (error) {
+      recordCaughtRuntimeError("#performEnable", error);
+
       this.#error = error instanceof Error ? error.message : "Cloud Train Background could not be enabled";
       this.#teardownPresentation();
-      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Retain the activation error. */ }
+      try { await this.#restoreCodexAppearanceTheme(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#performEnable", __codeCodexCaught);
+ /* Retain the activation error. */ }
       throw error;
     } finally {
       this.#pending = false;
@@ -3819,6 +3976,8 @@ class CloudTrainBackgroundController {
       if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
       this.#error = undefined;
     } catch (error) {
+      recordCaughtRuntimeError("disable", error);
+
       this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
     }
     this.#notify();
@@ -3863,6 +4022,8 @@ class CloudTrainBackgroundController {
     let current: CodexAppearanceTheme;
     try { current = await readCodexAppearanceTheme(); }
     catch (error) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
       if (codexDarkThemeApplied()) return;
       throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
     }
@@ -3885,7 +4046,11 @@ class CloudTrainBackgroundController {
       await writeCodexAppearanceTheme("dark");
       await waitForCodexDarkTheme();
     } catch (error) {
-      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", __codeCodexCaught);
+ /* Retain lease for retry. */ }
       throw new Error("Codex could not switch to Dark automatically.", { cause: error });
     }
   }
@@ -3923,7 +4088,9 @@ class CloudTrainBackgroundController {
       const preference = await readCodexAppearanceTheme();
       if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
       if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
-    } catch { /* A transient read failure does not tear down the presentation. */ }
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#checkCodexThemePreference", __codeCodexCaught);
+ /* A transient read failure does not tear down the presentation. */ }
     if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
   }
   #stopForExternalThemeChange(): void {
@@ -3948,7 +4115,9 @@ function getCloudTrainBackgroundController(): CloudTrainBackgroundController {
   const existing = globalState[CLOUD_TRAIN_BACKGROUND_CONTROLLER];
   if (existing instanceof CloudTrainBackgroundController) return existing;
   if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
-    try { existing.dispose(); } catch { /* Replace a stale controller. */ }
+    try { existing.dispose(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("getCloudTrainBackgroundController", __codeCodexCaught);
+ /* Replace a stale controller. */ }
   }
   const controller = new CloudTrainBackgroundController();
   globalState[CLOUD_TRAIN_BACKGROUND_CONTROLLER] = controller;
@@ -4027,6 +4196,8 @@ class PixelSculptBackgroundController {
       registerBackgroundOpening(canvas, renderer);
       await renderer.ready;
     } catch (error) {
+      recordCaughtRuntimeError("#createEditor", error);
+
       renderer?.dispose();
       if (this.#renderer === renderer) this.#renderer = undefined;
       if (this.#layer === layer) this.#layer = undefined;
@@ -4069,9 +4240,13 @@ class PixelSculptBackgroundController {
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
     } catch (error) {
+      recordCaughtRuntimeError("#performEnable", error);
+
       this.#error = error instanceof Error ? error.message : "Pixel Sculpt Background could not be enabled";
       this.#detachPresentation();
-      try { await this.#restoreCodexAppearanceTheme(); } catch { /* Retain the activation error. */ }
+      try { await this.#restoreCodexAppearanceTheme(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#performEnable", __codeCodexCaught);
+ /* Retain the activation error. */ }
       throw error;
     } finally {
       this.#pending = false;
@@ -4092,6 +4267,8 @@ class PixelSculptBackgroundController {
       if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
       this.#error = undefined;
     } catch (error) {
+      recordCaughtRuntimeError("disable", error);
+
       this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
     }
     this.#notify();
@@ -4138,6 +4315,8 @@ class PixelSculptBackgroundController {
     let current: CodexAppearanceTheme;
     try { current = await readCodexAppearanceTheme(); }
     catch (error) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
       if (codexDarkThemeApplied()) return;
       throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
     }
@@ -4160,7 +4339,11 @@ class PixelSculptBackgroundController {
       await writeCodexAppearanceTheme("dark");
       await waitForCodexDarkTheme();
     } catch (error) {
-      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch { /* Retain lease for retry. */ }
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
+      try { await writeCodexAppearanceTheme(current); clearParticleThemeLease(owner); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", __codeCodexCaught);
+ /* Retain lease for retry. */ }
       throw new Error("Codex could not switch to Dark automatically.", { cause: error });
     }
   }
@@ -4198,7 +4381,9 @@ class PixelSculptBackgroundController {
       const preference = await readCodexAppearanceTheme();
       if (!this.#enabled || generation !== this.#codexThemeMonitorGeneration) return;
       if (preference !== "dark") { this.#stopForExternalThemeChange(); return; }
-    } catch { /* A transient read failure does not tear down the presentation. */ }
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#checkCodexThemePreference", __codeCodexCaught);
+ /* A transient read failure does not tear down the presentation. */ }
     if (this.#enabled && generation === this.#codexThemeMonitorGeneration) this.#scheduleCodexThemePreferenceCheck();
   }
   #stopForExternalThemeChange(): void {
@@ -4223,7 +4408,9 @@ function getPixelSculptBackgroundController(): PixelSculptBackgroundController {
   const existing = globalState[PIXEL_SCULPT_BACKGROUND_CONTROLLER];
   if (existing instanceof PixelSculptBackgroundController) return existing;
   if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
-    try { existing.dispose(); } catch { /* Replace a stale controller. */ }
+    try { existing.dispose(); } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("getPixelSculptBackgroundController", __codeCodexCaught);
+ /* Replace a stale controller. */ }
   }
   const controller = new PixelSculptBackgroundController();
   globalState[PIXEL_SCULPT_BACKGROUND_CONTROLLER] = controller;
@@ -4333,11 +4520,15 @@ class BlackHoleBackgroundController {
       this.#observeCodexTheme();
       this.#scheduleCodexThemePreferenceCheck();
     } catch (error) {
+      recordCaughtRuntimeError("#performEnable", error);
+
       this.#error = error instanceof Error ? error.message : "Black Hole Background could not be enabled";
       this.#teardownPresentation();
       try {
         await this.#restoreCodexAppearanceTheme();
-      } catch {
+      } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#performEnable", __codeCodexCaught);
+
         // Retain the activation error. A retained theme lease retries on disable.
       }
       throw error;
@@ -4360,6 +4551,8 @@ class BlackHoleBackgroundController {
       if (!preserveTheme) await this.#restoreCodexAppearanceTheme();
       this.#error = undefined;
     } catch (error) {
+      recordCaughtRuntimeError("disable", error);
+
       this.#error = error instanceof Error ? error.message : "The previous Codex Appearance could not be restored";
     }
     this.#notify();
@@ -4412,6 +4605,8 @@ class BlackHoleBackgroundController {
     try {
       current = await readCodexAppearanceTheme();
     } catch (error) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
       if (codexDarkThemeApplied()) return;
       throw new Error("Codex Appearance is unavailable. Restart Codex with Code-Codex, then try again.", { cause: error });
     }
@@ -4442,10 +4637,14 @@ class BlackHoleBackgroundController {
       await writeCodexAppearanceTheme("dark");
       await waitForCodexDarkTheme();
     } catch (error) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", error);
+
       try {
         await writeCodexAppearanceTheme(current);
         clearParticleThemeLease(owner);
-      } catch {
+      } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#ensureCodexDarkTheme", __codeCodexCaught);
+
         // Retain the lease so a later disable/startup can retry restoration.
       }
       throw new Error("Codex could not switch to Dark automatically.", { cause: error });
@@ -4498,7 +4697,9 @@ class BlackHoleBackgroundController {
         this.#stopForExternalThemeChange();
         return;
       }
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#checkCodexThemePreference", __codeCodexCaught);
+
       // A transient read failure must not tear down an active presentation.
     }
     if (this.#enabled && generation === this.#codexThemeMonitorGeneration) {
@@ -4536,7 +4737,9 @@ function getBlackHoleBackgroundController(): BlackHoleBackgroundController {
   if (existing && typeof existing === "object" && "dispose" in existing && typeof existing.dispose === "function") {
     try {
       existing.dispose();
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("getBlackHoleBackgroundController", __codeCodexCaught);
+
       // Replace a stale controller from an earlier injected bundle.
     }
   }
@@ -6247,7 +6450,9 @@ export class CodeCodexElement extends HTMLElement {
     this.#mountainInitialization = this.#milkyWayBackgroundInitialization.then(async () => {
       if (!this.#isCurrentBackgroundInitialization(appearanceInitializationGeneration)) return;
       if (this.#enabledAppearancePlugins.has(MOUNTAIN_BACKGROUND_PLUGIN_ID)) {
-        try { await this.#mountainController.enable(); } catch(error) { this.#showActionNotice(String(error), "error"); }
+        try { await this.#mountainController.enable(); } catch(error) {
+      recordCaughtRuntimeError("connectedCallback", error);
+ this.#showActionNotice(String(error), "error"); }
       }
       this.#renderMountain();
     });
@@ -6262,7 +6467,9 @@ export class CodeCodexElement extends HTMLElement {
     this.#cloudTrainInitialization = this.#mountainInitialization!.then(async () => {
       if (!this.#isCurrentBackgroundInitialization(appearanceInitializationGeneration)) return;
       if (this.#enabledAppearancePlugins.has(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID)) {
-        try { await this.#cloudTrainController.enable(); } catch(error) { this.#showActionNotice(String(error), "error"); }
+        try { await this.#cloudTrainController.enable(); } catch(error) {
+      recordCaughtRuntimeError("connectedCallback", error);
+ this.#showActionNotice(String(error), "error"); }
       }
       this.#renderCloudTrain();
     });
@@ -6274,7 +6481,9 @@ export class CodeCodexElement extends HTMLElement {
     });
     this.#pixelSculptInitialization = this.#cloudTrainInitialization.then(async()=>{
       if(!this.#isCurrentBackgroundInitialization(appearanceInitializationGeneration))return;
-      if(this.#enabledAppearancePlugins.has(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID)){try{await this.#pixelSculptController.enable();}catch(error){this.#showActionNotice(String(error),"error");}}
+      if(this.#enabledAppearancePlugins.has(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID)){try{await this.#pixelSculptController.enable();}catch(error){
+      recordCaughtRuntimeError("connectedCallback", error);
+this.#showActionNotice(String(error),"error");}}
       this.#renderPixelSculpt();
     });
     this.#bindPixelSculpt();
@@ -6290,7 +6499,9 @@ export class CodeCodexElement extends HTMLElement {
       if (!this.#isCurrentBackgroundInitialization(appearanceInitializationGeneration)) return;
       if (this.#enabledAppearancePlugins.has(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID)) {
         try { await this.#blinkingSquaresController.enable(); }
-        catch (error) { this.#showActionNotice(String(error), "error"); }
+        catch (error) {
+      recordCaughtRuntimeError("connectedCallback", error);
+ this.#showActionNotice(String(error), "error"); }
       }
       this.#renderBlinkingSquares();
     });
@@ -6519,7 +6730,9 @@ export class CodeCodexElement extends HTMLElement {
           await this.#clearNativeContext(bridge);
         }
       }
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("disable", __codeCodexCaught);
+
       // Native context clear was attempted in the inner finally. Removal still
       // revokes the renderer surface if the bridge no longer accepts requests.
     } finally {
@@ -6696,7 +6909,9 @@ export class CodeCodexElement extends HTMLElement {
     try {
       const stored = localStorage.getItem(BACKGROUND_SETTINGS_LANGUAGE_KEY);
       if (stored === "en" || stored === "zh") backgroundSettingsLanguageSession = stored;
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#readBackgroundSettingsLanguage", __codeCodexCaught);
+
       // Keep the last in-memory selection when DOM storage is unavailable.
     }
     return backgroundSettingsLanguageSession;
@@ -6706,7 +6921,9 @@ export class CodeCodexElement extends HTMLElement {
     backgroundSettingsLanguageSession = this.#backgroundSettingsLanguage;
     try {
       localStorage.setItem(BACKGROUND_SETTINGS_LANGUAGE_KEY, this.#backgroundSettingsLanguage);
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#writeBackgroundSettingsLanguage", __codeCodexCaught);
+
       // The selected language remains active for this session when DOM storage is unavailable.
     }
   }
@@ -7623,12 +7840,16 @@ export class CodeCodexElement extends HTMLElement {
         if (generation !== this.#generation) return;
         this.#watching = true;
       } catch (error) {
+      recordCaughtRuntimeError("#switchThread", error);
+
         if (generation !== this.#generation) return;
         this.#watching = false;
         diagnostic.event('file watcher','failed',runtimeErrorDetails(error));
       }
       if (this.#watching) await this.#loadDirectory("");
     } catch (error) {
+      recordCaughtRuntimeError("#switchThread", error);
+
       diagnostic.event('workspace preparation','failed',runtimeErrorDetails(error));
       if (generation !== this.#generation) return;
       if (error instanceof ExplorerBridgeError && error.code === "NO_CONTEXT") {
@@ -7639,6 +7860,8 @@ export class CodeCodexElement extends HTMLElement {
           this.#showNoProject();
           this.#showGitHistoryUnavailable("Choose a local project to view its Git history.");
         } catch (clearError) {
+      recordCaughtRuntimeError("#switchThread", clearError);
+
           if (generation === this.#generation) {
             this.#setState("error", errorCode(clearError));
             this.#showGitHistoryUnavailable("Git history is unavailable for this task.");
@@ -7664,6 +7887,8 @@ export class CodeCodexElement extends HTMLElement {
     try {
       return await bridge.request<T>(method, params);
     } catch (error) {
+      recordCaughtRuntimeError("#requestBootstrap", error);
+
       if (!isTransientBootstrapError(error) || !this.#canRetryBootstrap(bridge, generation)) throw error;
       runtimeEvent('file-tree','bootstrap retry','scheduled',{method,generation,delayMs:BOOTSTRAP_RETRY_DELAY_MS,...runtimeErrorDetails(error)});
       await new Promise<void>((resolve) => setTimeout(resolve, BOOTSTRAP_RETRY_DELAY_MS));
@@ -7745,6 +7970,8 @@ export class CodeCodexElement extends HTMLElement {
         }
       }
     } catch (error) {
+      recordCaughtRuntimeError("#performDirectoryLoad", error);
+
       diagnostic.finish('failed',runtimeErrorDetails(error));
       if (generation !== this.#generation) return;
       this.#model.failLoad(path, friendlyError(error));
@@ -7780,6 +8007,27 @@ export class CodeCodexElement extends HTMLElement {
   }
 
   #onNotification(method: string, params: unknown): void {
+    if (method === "explorer.update.progress") {
+      const value = asRecord(params);
+      if (!value || !this.#updateInstallPending || value.latestVersion !== this.#updateCandidate?.latestVersion) return;
+      const phase = value?.phase;
+      const details = asRecord(value?.details);
+      const percent = typeof details?.percent === "number" && Number.isFinite(details.percent) ? ` ${Math.max(0, Math.min(100, Math.floor(details.percent)))}%` : "";
+      const messages: Record<string, string> = {
+        "checking release": "Checking the update package…",
+        "downloading": `Downloading the update${percent}…`,
+        "verifying": "Download complete. Verifying the update package…",
+        "waiting for installer window": "Package verified. Starting setup and waiting for its window…",
+        "installer window shown": "Setup window is now visible. Continue installation there.",
+        "installer window unconfirmed": "Setup started, but its window has not been confirmed. Please wait; do not start another update.",
+      };
+      if (typeof phase === "string" && messages[phase]) {
+        this.#showActionProgress(messages[phase]);
+        this.#updateMessage.textContent = messages[phase];
+        runtimeEvent("renderer", "update progress", "observed", {phase, latestVersion:value.latestVersion, percent:details?.percent});
+      }
+      return;
+    }
     if (method === "explorer.changed") {
       if (!this.#context || this.#state === "loading") return;
       this.#applyChanges(params);
@@ -8321,7 +8569,9 @@ export class CodeCodexElement extends HTMLElement {
     marquee.active = true;
     try {
       this.#treeShell.setPointerCapture(marquee.pointerId);
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#beginMarquee", __codeCodexCaught);
+
       // Pointer capture is best-effort; the window pointercancel still cleans up.
     }
     if (!marquee.additive) this.#clearSelection(true);
@@ -8365,7 +8615,9 @@ export class CodeCodexElement extends HTMLElement {
     if (marquee.active) {
       try {
         this.#treeShell.releasePointerCapture(marquee.pointerId);
-      } catch {
+      } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#cancelMarquee", __codeCodexCaught);
+
         // Already released or never captured.
       }
     }
@@ -8673,6 +8925,8 @@ export class CodeCodexElement extends HTMLElement {
         `${imported.length.toLocaleString()} dropped ${imported.length === 1 ? "item" : "items"} copied.`,
       );
     } catch (error) {
+      recordCaughtRuntimeError("#importExternalDrop", error);
+
       if (this.#canApplyExternalImportResult(bridge, context, generation)) {
         // A lost commit response does not prove the atomic rename failed. Never
         // replay the write: re-read only, scoped to the original workspace.
@@ -8811,6 +9065,8 @@ export class CodeCodexElement extends HTMLElement {
       try {
         bytes = new Uint8Array(await file.slice(offset, offset + expectedLength).arrayBuffer());
       } catch (error) {
+      recordCaughtRuntimeError("#uploadExternalFile", error);
+
         throw normalizeExternalDropReadError(error);
       }
       if (bytes.byteLength !== expectedLength) {
@@ -8907,13 +9163,17 @@ export class CodeCodexElement extends HTMLElement {
         if (!shouldLoad) continue;
         try {
           await this.#loadDirectory(path, false, true);
-        } catch {}
+        } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#moveEntryByDrop", __codeCodexCaught);
+}
       }
 
       const movedPath = destinationParentPath ? `${destinationParentPath}/${source.name}` : source.name;
       const movedIndex = this.#rows.findIndex((row) => row.kind === "node" && row.path === movedPath);
       if (movedIndex >= 0) this.#focusIndex(movedIndex, false);
     } catch (error) {
+      recordCaughtRuntimeError("#moveEntryByDrop", error);
+
       this.#showActionNotice(contextActionError("move", error), "error");
     } finally {
       this.#contextActionPending = false;
@@ -9326,6 +9586,8 @@ export class CodeCodexElement extends HTMLElement {
     try {
       close = await this.#performContextMenuAction(action, target);
     } catch (error) {
+      recordCaughtRuntimeError("#runContextMenuAction", error);
+
       this.#showActionNotice(contextActionError(action, error), "error");
     } finally {
       this.#contextActionPending = false;
@@ -9458,7 +9720,9 @@ export class CodeCodexElement extends HTMLElement {
         if (!current) return;
         try {
           await this.#refreshDirectoryIfLoaded(parentRelativePath);
-        } catch {}
+        } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#runContextMenuMutation", __codeCodexCaught);
+}
         succeeded = true;
       } else if (action === "rename") {
         if (name === undefined) throw new Error("A name is required.");
@@ -9468,7 +9732,9 @@ export class CodeCodexElement extends HTMLElement {
         this.#closePreviewTabsWithin(target.path);
         try {
           await this.#refreshDirectoryIfLoaded(target.parentPath);
-        } catch {}
+        } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#runContextMenuMutation", __codeCodexCaught);
+}
         succeeded = true;
       } else {
         // Delete: operate on all selected paths if the target is part of a multi-selection.
@@ -9488,10 +9754,14 @@ export class CodeCodexElement extends HTMLElement {
         }
         try {
           for (const parentPath of parentPaths) await this.#refreshDirectoryIfLoaded(parentPath);
-        } catch {}
+        } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#runContextMenuMutation", __codeCodexCaught);
+}
         succeeded = true;
       }
     } catch (error) {
+      recordCaughtRuntimeError("#runContextMenuMutation", error);
+
       failureMessage = contextActionError(action, error);
     } finally {
       this.#contextActionPending = false;
@@ -9542,7 +9812,9 @@ export class CodeCodexElement extends HTMLElement {
       try {
         await clipboard.writeText(path);
         return;
-      } catch {
+      } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#copyRelativePath", __codeCodexCaught);
+
         // Codex may expose the Clipboard API without granting this injected realm permission.
       }
     }
@@ -9556,7 +9828,9 @@ export class CodeCodexElement extends HTMLElement {
     let copied = false;
     try {
       copied = this.ownerDocument.execCommand("copy");
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#copyRelativePath", __codeCodexCaught);
+
       copied = false;
     } finally {
       input.remove();
@@ -9599,6 +9873,8 @@ export class CodeCodexElement extends HTMLElement {
       if (targetDir) await this.#loadDirectory(targetDir, false, true);
       else await this.#refreshLoadedDirectories();
     } catch (error) {
+      recordCaughtRuntimeError("#pasteFiles", error);
+
       this.#showActionNotice(contextActionError("paste", error), "error");
     }
   }
@@ -9625,6 +9901,8 @@ export class CodeCodexElement extends HTMLElement {
         if (parentPath) await this.#refreshDirectoryIfLoaded(parentPath);
       }
     } catch (error) {
+      recordCaughtRuntimeError("#deleteSelectedFiles", error);
+
       this.#showActionNotice(contextActionError("delete", error), "error");
     }
   }
@@ -9935,6 +10213,8 @@ export class CodeCodexElement extends HTMLElement {
         this.#finishSuccessfulSave(tab, preview, operation, exitAfterSave);
       }
     } catch (error) {
+      recordCaughtRuntimeError("#saveEditing", error);
+
       if (!this.#canApplyEditSave(tab, bridge, context, mainPreview, generation, sessionRevision, instanceId, path, editSession)) return;
       tab.modifiedDuringSave = false;
       this.#editSaving = false;
@@ -10116,7 +10396,9 @@ export class CodeCodexElement extends HTMLElement {
   #confirmDiscardEditing(message: string): boolean {
     try {
       return this.ownerDocument.defaultView?.confirm(message) === true;
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#confirmDiscardEditing", __codeCodexCaught);
+
       return false;
     }
   }
@@ -10269,6 +10551,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#announce(preview.kind === "unsupported" ? `Preview unavailable for ${tab.name}` : `Preview loaded for ${tab.name}`);
       diagnostic.finish('applied',{kind:preview.kind});
     } catch (error) {
+      recordCaughtRuntimeError("#requestPreview", error);
+
       diagnostic.finish('failed',runtimeErrorDetails(error));
       if (!this.#canApplyPreview(tab, bridge, context, mainPreview, generation, sessionRevision, instanceId, revision)) return;
       const code = errorCode(error);
@@ -10341,6 +10625,8 @@ export class CodeCodexElement extends HTMLElement {
           ...(info.previewNotice === undefined ? {} : { previewNotice: info.previewNotice }),
         };
       } catch (error) {
+      recordCaughtRuntimeError("#requestMediaPreview", error);
+
         if (attempt === 0 && errorCode(error) === "CONFLICT" && canContinue()) continue;
         throw error;
       }
@@ -10749,7 +11035,9 @@ export class CodeCodexElement extends HTMLElement {
       const value: unknown = JSON.parse(localStorage.getItem(PREVIEWER_SETTINGS_KEY) || "[]");
       if (!Array.isArray(value)) return [];
       return [...new Set(value.filter((entry): entry is string => typeof entry === "string" && PREVIEWER_IDS.has(entry)))];
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#readEnabledPreviewers", __codeCodexCaught);
+
       return [];
     }
   }
@@ -10757,7 +11045,9 @@ export class CodeCodexElement extends HTMLElement {
   #writeEnabledPreviewers(): void {
     try {
       localStorage.setItem(PREVIEWER_SETTINGS_KEY, JSON.stringify([...this.#enabledPreviewers]));
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#writeEnabledPreviewers", __codeCodexCaught);
+
       // Preview extensions remain enabled for this session when DOM storage is unavailable.
     }
   }
@@ -10875,6 +11165,8 @@ export class CodeCodexElement extends HTMLElement {
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
       }
     } catch (error) {
+      recordCaughtRuntimeError("#initializeParticleBackground", error);
+
       console.error("Code-Codex could not initialize Particle Image Background", error);
     } finally {
       if (this.#isCurrentBackgroundInitialization(generation)) this.#renderPreviewMarket();
@@ -10996,6 +11288,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#writeEnabledAppearancePlugins();
       this.#announce(`Particle Image Background ${nextEnabled ? "enabled" : "disabled"}`);
     } catch (error) {
+      recordCaughtRuntimeError("#toggleParticleBackground", error);
+
       if (!this.#connected || operation !== this.#appearanceOperation) {
         const stoppedForThemeChange = this.#particleBackgroundController.stoppedForExternalThemeChange;
         const reconcilePrevious = this.#connected
@@ -11051,7 +11345,9 @@ export class CodeCodexElement extends HTMLElement {
           try {
             const restored = await this.#setWindowTransparency(bridge, true);
             this.#applyTransparentBackgroundPresentation(restored.background);
-          } catch {
+          } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#toggleParticleBackground", __codeCodexCaught);
+
             this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
           }
         } else {
@@ -11117,6 +11413,8 @@ export class CodeCodexElement extends HTMLElement {
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
       }
     } catch (error) {
+      recordCaughtRuntimeError("#initializeBlackHoleBackground", error);
+
       console.error("Code-Codex could not initialize Black Hole Background", error);
     } finally {
       if (this.#isCurrentBackgroundInitialization(generation)) this.#renderPreviewMarket();
@@ -11168,6 +11466,8 @@ export class CodeCodexElement extends HTMLElement {
         if (!this.#isCurrentBackgroundInitialization(generation)) return;
       }
     } catch (error) {
+      recordCaughtRuntimeError("#initializeGlowHorizonBackground", error);
+
       console.error("Code-Codex could not initialize Glow Horizon Background", error);
     } finally {
       if (this.#isCurrentBackgroundInitialization(generation)) this.#renderPreviewMarket();
@@ -11217,6 +11517,8 @@ export class CodeCodexElement extends HTMLElement {
         await this.#heavenlyCloudBackgroundController.disable();
       }
     } catch (error) {
+      recordCaughtRuntimeError("#initializeHeavenlyCloudBackground", error);
+
       console.error("Code-Codex could not initialize Heavenly Cloud Background", error);
     } finally {
       if (this.#isCurrentBackgroundInitialization(generation)) this.#renderPreviewMarket();
@@ -11269,6 +11571,8 @@ export class CodeCodexElement extends HTMLElement {
         await this.#auroraIonosphereBackgroundController.disable();
       }
     } catch (error) {
+      recordCaughtRuntimeError("#initializeAuroraIonosphereBackground", error);
+
       console.error("Code-Codex could not initialize Aurora Ionosphere Background", error);
     } finally {
       if (this.#isCurrentBackgroundInitialization(generation)) this.#renderPreviewMarket();
@@ -11321,6 +11625,8 @@ export class CodeCodexElement extends HTMLElement {
         await this.#milkyWayBackgroundController.disable();
       }
     } catch (error) {
+      recordCaughtRuntimeError("#initializeMilkyWayBackground", error);
+
       console.error("Code-Codex could not initialize Milky Way Background", error);
     } finally {
       if (this.#isCurrentBackgroundInitialization(generation)) this.#renderPreviewMarket();
@@ -11442,6 +11748,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#writeEnabledAppearancePlugins();
       this.#announce(`Black Hole Background ${nextEnabled ? "enabled" : "disabled"}`);
     } catch (error) {
+      recordCaughtRuntimeError("#toggleBlackHoleBackground", error);
+
       if (!this.#connected || operation !== this.#appearanceOperation) {
         const stoppedForThemeChange = this.#blackHoleBackgroundController.stoppedForExternalThemeChange;
         const reconcilePrevious = this.#connected
@@ -11497,7 +11805,9 @@ export class CodeCodexElement extends HTMLElement {
           try {
             const restored = await this.#setWindowTransparency(bridge, true);
             this.#applyTransparentBackgroundPresentation(restored.background);
-          } catch {
+          } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#toggleBlackHoleBackground", __codeCodexCaught);
+
             this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
           }
         } else {
@@ -11657,6 +11967,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#writeEnabledAppearancePlugins();
       this.#announce(`Glow Horizon Background ${nextEnabled ? "enabled" : "disabled"}`);
     } catch (error) {
+      recordCaughtRuntimeError("#toggleGlowHorizonBackground", error);
+
       if (!this.#connected || operation !== this.#appearanceOperation) {
         const stoppedForThemeChange = this.#glowHorizonBackgroundController.stoppedForExternalThemeChange;
         const restorePrevious = this.#connected && !this.#dismissed && !stoppedForThemeChange;
@@ -11704,7 +12016,9 @@ export class CodeCodexElement extends HTMLElement {
           try {
             const restored = await this.#setWindowTransparency(bridge, true);
             this.#applyTransparentBackgroundPresentation(restored.background);
-          } catch {
+          } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#toggleGlowHorizonBackground", __codeCodexCaught);
+
             this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
           }
         } else {
@@ -11833,6 +12147,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#writeEnabledAppearancePlugins();
       this.#announce(`Heavenly Cloud Background ${nextEnabled ? "enabled" : "disabled"}`);
     } catch (error) {
+      recordCaughtRuntimeError("#toggleHeavenlyCloudBackground", error);
+
       if (!this.#connected || operation !== this.#appearanceOperation) {
         const stoppedForThemeChange = this.#heavenlyCloudBackgroundController.stoppedForExternalThemeChange;
         const restorePrevious = this.#connected && !this.#dismissed && !stoppedForThemeChange;
@@ -11886,7 +12202,9 @@ export class CodeCodexElement extends HTMLElement {
           try {
             const restored = await this.#setWindowTransparency(bridge, true);
             this.#applyTransparentBackgroundPresentation(restored.background);
-          } catch {
+          } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#toggleHeavenlyCloudBackground", __codeCodexCaught);
+
             this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
           }
         } else {
@@ -12023,6 +12341,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#writeEnabledAppearancePlugins();
       this.#announce(`Aurora Ionosphere Background ${nextEnabled ? "enabled" : "disabled"}`);
     } catch (error) {
+      recordCaughtRuntimeError("#toggleAuroraIonosphereBackground", error);
+
       if (!this.#connected || operation !== this.#appearanceOperation) {
         const stoppedForThemeChange = this.#auroraIonosphereBackgroundController.stoppedForExternalThemeChange;
         const restorePrevious = this.#connected && !this.#dismissed && !stoppedForThemeChange;
@@ -12085,7 +12405,9 @@ export class CodeCodexElement extends HTMLElement {
           try {
             const restored = await this.#setWindowTransparency(bridge, true);
             this.#applyTransparentBackgroundPresentation(restored.background);
-          } catch {
+          } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#toggleAuroraIonosphereBackground", __codeCodexCaught);
+
             this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
           }
         } else {
@@ -12229,6 +12551,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#writeEnabledAppearancePlugins();
       this.#announce(`Milky Way Background ${nextEnabled ? "enabled" : "disabled"}`);
     } catch (error) {
+      recordCaughtRuntimeError("#toggleMilkyWayBackground", error);
+
       if (!this.#connected || operation !== this.#appearanceOperation) {
         const stoppedForThemeChange = this.#milkyWayBackgroundController.stoppedForExternalThemeChange;
         const restorePrevious = this.#connected && !this.#dismissed && !stoppedForThemeChange;
@@ -12299,7 +12623,9 @@ export class CodeCodexElement extends HTMLElement {
           try {
             const restored = await this.#setWindowTransparency(bridge, true);
             this.#applyTransparentBackgroundPresentation(restored.background);
-          } catch {
+          } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#toggleMilkyWayBackground", __codeCodexCaught);
+
             this.#applyTransparentBackgroundPresentation(previousTransparentBackground);
           }
         } else {
@@ -13505,8 +13831,12 @@ export class CodeCodexElement extends HTMLElement {
       }
       this.#writeEnabledAppearancePlugins();
     } catch(error) {
+      recordCaughtRuntimeError("#toggleMountain", error);
+
       this.#enabledAppearancePlugins.delete(MOUNTAIN_BACKGROUND_PLUGIN_ID);
-      if(previous>=0){try{await controllers[previous]!.enable();if(controllers[previous]!.enabled)this.#enabledAppearancePlugins.add(ids[previous]!);}catch{}}
+      if(previous>=0){try{await controllers[previous]!.enable();if(controllers[previous]!.enabled)this.#enabledAppearancePlugins.add(ids[previous]!);}catch (__codeCodexCaught){
+      recordCaughtRuntimeError("#toggleMountain", __codeCodexCaught);
+}}
       this.#writeEnabledAppearancePlugins();this.#showActionNotice(error instanceof Error?error.message:String(error),"error");
     } finally {this.#appearanceTransitionPending=false;this.#renderPreviewMarket();}
   }
@@ -13597,8 +13927,12 @@ export class CodeCodexElement extends HTMLElement {
       }
       this.#writeEnabledAppearancePlugins();
     } catch(error) {
+      recordCaughtRuntimeError("#toggleCloudTrain", error);
+
       this.#enabledAppearancePlugins.delete(CLOUD_TRAIN_BACKGROUND_PLUGIN_ID);
-      if(previous>=0){try{await controllers[previous]!.enable();if(controllers[previous]!.enabled)this.#enabledAppearancePlugins.add(ids[previous]!);}catch{}}
+      if(previous>=0){try{await controllers[previous]!.enable();if(controllers[previous]!.enabled)this.#enabledAppearancePlugins.add(ids[previous]!);}catch (__codeCodexCaught){
+      recordCaughtRuntimeError("#toggleCloudTrain", __codeCodexCaught);
+}}
       this.#writeEnabledAppearancePlugins();this.#showActionNotice(error instanceof Error?error.message:String(error),"error");
     } finally {this.#appearanceTransitionPending=false;this.#renderPreviewMarket();}
   }
@@ -13662,7 +13996,9 @@ export class CodeCodexElement extends HTMLElement {
       void Promise.resolve(renderer.ready).then(() => {
         if (active && this.#startupBackgroundPreview === preview) runtimeEvent('startup-animation', 'background preview', 'started', { backgroundId });
       }, fail);
-    } catch (error) { fail(error); }
+    } catch (error) {
+      recordCaughtRuntimeError("#ensureStartupBackgroundPreview", error);
+ fail(error); }
     }, fail);
   }
 
@@ -13811,6 +14147,8 @@ export class CodeCodexElement extends HTMLElement {
       if (!this.#connected || generation !== this.#startupVideoGeneration) return;
       this.#setStartupVideo(video);
     } catch (error) {
+      recordCaughtRuntimeError("#loadStartupVideoForPanel", error);
+
       if (generation === this.#startupVideoGeneration) this.#showStartupTransitionError(error);
     }
   }
@@ -13924,6 +14262,8 @@ export class CodeCodexElement extends HTMLElement {
         };
         this.#startupPlaybackFrame = requestAnimationFrame(tick);
       } catch (error) {
+      recordCaughtRuntimeError("play", error);
+
         if (generation === this.#startupPlaybackGeneration) { this.#stopStartupPreview(); this.#showStartupTransitionError(error); }
       }
     };
@@ -13939,7 +14279,9 @@ export class CodeCodexElement extends HTMLElement {
       if (native.startupTransitionEnabled !== enabled) {
         await bridge.request("explorer.settings.set", { settings: { startupTransitionEnabled: enabled } });
       }
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#syncStartupTransitionNativePreference", __codeCodexCaught);
+
       if (this.#bridge === bridge) this.#showActionNotice("Startup transition preference could not be synchronized", "error");
     }
   }
@@ -14003,7 +14345,9 @@ export class CodeCodexElement extends HTMLElement {
           await this.#bridge.request("explorer.settings.set", { settings: { startupTransitionEnabled: enabled } });
         }
         if (!writeStartupTransitionSettings({ ...settings, enabled })) throw new Error("Local preference unavailable");
-      } catch {
+      } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#bindStartupTransition", __codeCodexCaught);
+
         this.#showActionNotice("Startup transition setting could not be saved", "error");
       } finally {
         this.#startupTransitionPending = false;
@@ -14121,6 +14465,8 @@ export class CodeCodexElement extends HTMLElement {
         }
         this.#setStartupVideo(video);
       } catch (error) {
+      recordCaughtRuntimeError("#bindStartupTransition", error);
+
         if (generation === this.#startupVideoGeneration) this.#showStartupTransitionError(error);
       } finally {
         this.#startupVideoPending = false;
@@ -14136,6 +14482,8 @@ export class CodeCodexElement extends HTMLElement {
         this.#startupVideoGeneration += 1;
         this.#setStartupVideo(null);
       } catch (error) {
+      recordCaughtRuntimeError("#bindStartupTransition", error);
+
         this.#showStartupTransitionError(error);
       } finally {
         this.#startupVideoPending = false;
@@ -14295,10 +14643,14 @@ export class CodeCodexElement extends HTMLElement {
       this.#writeEnabledAppearancePlugins();
       this.#announce(`Blinking Squares Background ${this.#blinkingSquaresController.enabled ? "enabled" : "disabled"}`);
     } catch (error) {
+      recordCaughtRuntimeError("#toggleBlinkingSquares", error);
+
       this.#enabledAppearancePlugins.delete(BLINKING_SQUARES_BACKGROUND_PLUGIN_ID);
       if (previous >= 0) {
         try { await controllers[previous]!.enable(); if (controllers[previous]!.enabled) this.#enabledAppearancePlugins.add(ids[previous]!); }
-        catch { /* Preserve the original activation failure. */ }
+        catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#toggleBlinkingSquares", __codeCodexCaught);
+ /* Preserve the original activation failure. */ }
       }
       this.#writeEnabledAppearancePlugins();
       this.#showActionNotice(error instanceof Error ? error.message : String(error), "error");
@@ -14387,8 +14739,12 @@ export class CodeCodexElement extends HTMLElement {
       }
       this.#writeEnabledAppearancePlugins();
     } catch(error) {
+      recordCaughtRuntimeError("#togglePixelSculpt", error);
+
       this.#enabledAppearancePlugins.delete(PIXEL_SCULPT_BACKGROUND_PLUGIN_ID);
-      if(previous>=0){try{await controllers[previous]!.enable();if(controllers[previous]!.enabled)this.#enabledAppearancePlugins.add(ids[previous]!);}catch{}}
+      if(previous>=0){try{await controllers[previous]!.enable();if(controllers[previous]!.enabled)this.#enabledAppearancePlugins.add(ids[previous]!);}catch (__codeCodexCaught){
+      recordCaughtRuntimeError("#togglePixelSculpt", __codeCodexCaught);
+}}
       this.#writeEnabledAppearancePlugins();this.#showActionNotice(error instanceof Error?error.message:String(error),"error");
     } finally {this.#appearanceTransitionPending=false;this.#renderPreviewMarket();}
   }
@@ -14400,7 +14756,9 @@ export class CodeCodexElement extends HTMLElement {
       const value: unknown = JSON.parse(localStorage.getItem(APPEARANCE_PLUGIN_SETTINGS_KEY) || "[]");
       if (!Array.isArray(value)) return [];
       return [...new Set(value.filter((entry): entry is string => typeof entry === "string" && APPEARANCE_PLUGIN_IDS.has(entry)))];
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#readEnabledAppearancePlugins", __codeCodexCaught);
+
       return [];
     }
   }
@@ -14409,7 +14767,9 @@ export class CodeCodexElement extends HTMLElement {
     runtimeEvent("renderer", "appearance plugins", "active set updated", {plugins:[...this.#enabledAppearancePlugins]});
     try {
       localStorage.setItem(APPEARANCE_PLUGIN_SETTINGS_KEY, JSON.stringify([...this.#enabledAppearancePlugins]));
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#writeEnabledAppearancePlugins", __codeCodexCaught);
+
       // Appearance plugins remain enabled for this session when DOM storage is unavailable.
     }
   }
@@ -14471,6 +14831,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#appearancePluginApplied = true;
       this.#appearancePluginError = undefined;
     } catch (error) {
+      recordCaughtRuntimeError("#runAppearanceHealthCheck", error);
+
       retryDelay = 500;
       if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
       this.#clearTransparentBackgroundPresentation();
@@ -14644,6 +15006,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#renderMilkyWayBackgroundPlugin();
       this.#announce(`Transparent Background ${nextEnabled ? "enabled" : "disabled"}`);
     } catch (error) {
+      recordCaughtRuntimeError("#toggleTransparentBackground", error);
+
       if (!this.#connected || operation !== this.#appearanceOperation) return;
       if (nextEnabled) {
         if (milkyWayWasActive && !this.#milkyWayBackgroundController.enabled) await this.#milkyWayBackgroundController.enable().catch(() => undefined);
@@ -14700,6 +15064,8 @@ export class CodeCodexElement extends HTMLElement {
       if (requestedEnabled) this.#applyTransparentBackgroundPresentation(result.background);
       this.#appearancePluginApplied = requestedEnabled;
     } catch (error) {
+      recordCaughtRuntimeError("#syncPersistedAppearance", error);
+
       if (!this.#isCurrentAppearanceOperation(bridge, operation)) return;
       if (
         !requestedEnabled
@@ -14737,7 +15103,9 @@ export class CodeCodexElement extends HTMLElement {
       if (requestedEnabled) this.#applyTransparentBackgroundPresentation(result.background);
       else this.#clearTransparentBackgroundPresentation();
       this.#appearancePluginApplied = requestedEnabled;
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#reconcilePersistedWindowTransparency", __codeCodexCaught);
+
       // The next bridge synchronization retries the persisted preference.
     }
   }
@@ -15366,6 +15734,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#gitHistoryBranch.textContent = result.branch;
       this.#renderGitHistoryList();
     } catch (error) {
+      recordCaughtRuntimeError("#loadGitHistory", error);
+
       if (generation === this.#gitHistoryGeneration && this.#gitHistoryOpen) {
         this.#showGitHistoryError(gitHistoryError(error));
       }
@@ -15408,6 +15778,8 @@ export class CodeCodexElement extends HTMLElement {
       if (generation !== this.#gitHistoryGeneration || !this.#gitHistoryOpen) return;
       this.#renderGitCommit(result);
     } catch (error) {
+      recordCaughtRuntimeError("#openGitCommit", error);
+
       if (generation === this.#gitHistoryGeneration) this.#gitHistoryDetail.textContent = gitHistoryError(error);
     }
   }
@@ -15470,6 +15842,8 @@ export class CodeCodexElement extends HTMLElement {
       this.#syncMainPreview();
       this.#announce(`${name} changes opened in the main view`);
     } catch (error) {
+      recordCaughtRuntimeError("#openGitHistoryFile", error);
+
       if (!this.#previewTabs.includes(tab) || tab.revision !== revision) return;
       tab.view = { kind: "error", path: tabPath, name, code: errorCode(error), message: gitHistoryError(error) };
       this.#syncMainPreview();
@@ -15624,7 +15998,9 @@ export class CodeCodexElement extends HTMLElement {
   #readLocalSettings(): ExplorerSettings {
     try {
       return normalizeSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null"));
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#readLocalSettings", __codeCodexCaught);
+
       return { ...DEFAULT_SETTINGS };
     }
   }
@@ -15636,7 +16012,9 @@ export class CodeCodexElement extends HTMLElement {
       this.#settings = normalizeSettings(asRecord(raw)?.settings ?? raw);
       this.#applySettings();
       this.#writeLocalSettings();
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#loadNativeSettings", __codeCodexCaught);
+
       if (!this.#canUseBridge(bridge, generation)) return;
       // Local storage is the reversible fallback when native settings are unavailable.
     }
@@ -15654,7 +16032,9 @@ export class CodeCodexElement extends HTMLElement {
   #writeLocalSettings(): void {
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.#settings));
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("#writeLocalSettings", __codeCodexCaught);
+
       // The native settings bridge remains available when DOM storage is disabled.
     }
   }
@@ -15742,6 +16122,8 @@ export class CodeCodexElement extends HTMLElement {
         else this.#showActionNotice(this.#updateCheckSummary);
       }
     } catch (error) {
+      recordCaughtRuntimeError("#checkForUpdates", error);
+
       if (operation !== this.#updateCheckOperation || !this.#connected || bridge !== this.#bridge) return;
       this.#updateCheckPresentation = "error";
       this.#updateCheckSummary = updateCheckError(error);
@@ -15798,18 +16180,24 @@ export class CodeCodexElement extends HTMLElement {
     try {
       const result = normalizeUpdateInstallResult(await bridge.request<unknown>("explorer.update.install", {
         latestVersion: candidate.latestVersion,
-      }));
+      }, 210_000));
       if (operation !== this.#updateCheckOperation || !this.#connected || bridge !== this.#bridge) return;
       if (result.latestVersion !== candidate.latestVersion || !result.launched) {
         throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The update installer response was not valid." });
       }
       this.#updateInstallPending = false;
       this.#closeUpdateDialog(false);
-      this.#updateCheckSummary = `Code-Codex v${result.latestVersion} setup is open. Finish installation; the running Codex window will activate it automatically.`;
-      this.#showActionNotice(this.#updateCheckSummary);
+      this.#updateCheckSummary = result.windowReady
+        ? `Code-Codex v${result.latestVersion} setup window is visible. Finish installation there.`
+        : `Code-Codex v${result.latestVersion} setup started, but its window has not been confirmed. Do not start another update; check setup or Runtime Information.`;
+      if (result.windowReady) this.#showActionNotice(this.#updateCheckSummary);
+      else this.#showActionProgress(this.#updateCheckSummary);
     } catch (error) {
+      recordCaughtRuntimeError("#installUpdate", error);
+
       if (operation !== this.#updateCheckOperation || !this.#connected || bridge !== this.#bridge) return;
       this.#updateCheckSummary = updateInstallError(error);
+      this.#updateMessage.textContent = this.#updateCheckSummary;
       this.#showActionNotice(this.#updateCheckSummary, "error");
     } finally {
       if (operation === this.#updateCheckOperation) {
@@ -15931,21 +16319,27 @@ function captureExternalDropCandidates(dataTransfer: DataTransfer | null): reado
       if (typeof item.getAsFileSystemHandle === "function") {
         handlePromise = item.getAsFileSystemHandle.call(item);
       }
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("captureExternalDropCandidates", __codeCodexCaught);
+
       handlePromise = undefined;
     }
 
     let entry: FileSystemEntry | undefined;
     try {
       entry = item.webkitGetAsEntry?.() ?? item.getAsEntry?.() ?? undefined;
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("captureExternalDropCandidates", __codeCodexCaught);
+
       entry = undefined;
     }
 
     let file: File | undefined;
     try {
       file = item.getAsFile() ?? undefined;
-    } catch {
+    } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("captureExternalDropCandidates", __codeCodexCaught);
+
       file = undefined;
     }
     if (handlePromise || entry || file) {
@@ -15993,6 +16387,8 @@ async function resolveExternalDropRoots(
       }
     }
   } catch (error) {
+      recordCaughtRuntimeError("resolveExternalDropRoots", error);
+
     throw normalizeExternalDropReadError(error);
   }
   if (!roots.length) {
@@ -16298,7 +16694,9 @@ function normalizeUpdateCheckResult(raw: unknown): UpdateCheckResult {
   let releaseUrl: URL;
   try {
     releaseUrl = new URL(object.releaseUrl);
-  } catch {
+  } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("normalizeUpdateCheckResult", __codeCodexCaught);
+
     throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The GitHub release URL was not valid." });
   }
   if (
@@ -16327,14 +16725,15 @@ function normalizeUpdateInstallResult(raw: unknown): UpdateInstallResult {
   const object = asRecord(raw);
   if (
     !object
-    || Object.keys(object).length !== 2
+    || Object.keys(object).some(key => !["latestVersion", "launched", "windowReady"].includes(key))
     || typeof object.latestVersion !== "string"
     || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(object.latestVersion)
     || object.launched !== true
+    || (object.windowReady !== undefined && typeof object.windowReady !== "boolean")
   ) {
     throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The update installer response was not valid." });
   }
-  return { latestVersion: object.latestVersion, launched: true };
+  return { latestVersion: object.latestVersion, launched: true, windowReady: object.windowReady === true };
 }
 
 function updateCheckError(error: unknown): string {
@@ -16349,6 +16748,7 @@ function updateCheckError(error: unknown): string {
 }
 
 function updateInstallError(error: unknown): string {
+  if (errorCode(error) === "UPDATE_INSTALLER_EARLY_EXIT") return "Setup exited before its window appeared. Check the installation diagnostic report and Runtime Information.";
   const code = errorCode(error);
   if (code === "UPDATE_NO_LONGER_AVAILABLE") return "The selected update is no longer the latest. Check again.";
   if (code === "UPDATE_ASSET_UNAVAILABLE") return "The latest GitHub release does not contain a verified Windows setup program.";
@@ -16519,7 +16919,9 @@ function normalizeMediaChunk(
   let binary: string;
   try {
     binary = window.atob(object.dataBase64);
-  } catch {
+  } catch (__codeCodexCaught) {
+      recordCaughtRuntimeError("normalizeMediaChunk", __codeCodexCaught);
+
     throw new ExplorerBridgeError({ code: "INVALID_REQUEST", message: "The media preview chunk was not valid Base64." });
   }
   if (binary.length !== expectedLength) {

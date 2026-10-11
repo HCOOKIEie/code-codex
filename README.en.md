@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.4-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.9-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -31,11 +31,11 @@ editing, navigation, and file operations.
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
 
-Version **0.4.4** adds correlated stages, timings and error chains for plugin downloads, Bridge/App Server requests, file-tree and preview operations, module loading and updates. Copy/export stops on refresh failure instead of returning stale logs. The latest 10 runs and 5 MiB per run limits and redaction remain. Version **0.4.4** checks GitHub once in the background at startup. An available release briefly appears in the footer with a rainbow fade, a 1.5-second hold and a fade back to the installed version, leaving a clickable update dot. Current releases receive brief green confirmation; failed checks remain neutral and can be retried manually. Upgrades preserve plugin caches and preferences. Published as [GitHub v0.4.4](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.4).
+Local maintenance version **0.4.9** preserves the startup error dialog layout, presents the first failure promptly and appends automatic checks, outcomes and recovery assessment under a fifteen-second budget. Copy details and saved reports retain the original error and subsequent evidence. Updates show download, verification and installer-window handoff continuously; window readiness requires an explicit acknowledgement, and early exit is distinguished from an unconfirmed window. The UI request deadline now matches the native download budget. Not yet published; public downloads remain v0.4.4 and plugin assets remain pinned to v0.3.96. User preferences and caches are preserved.
 
 ## Install Option 1: Download EXE
 
-Download the installer from [GitHub Release v0.4.4](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.4); matching build files are retained in [`releases`](releases/):
+Download the installer from [GitHub Release v0.4.4](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.4). Local [`releases`](releases/) contains builds of the current source and may be ahead of the published version:
 
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
@@ -91,7 +91,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.4
+./scripts/package.ps1 -Version 0.4.9
 ```
 
 The generated packages are written to `releases/`.

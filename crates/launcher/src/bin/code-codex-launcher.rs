@@ -11,7 +11,9 @@ use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -20,13 +22,16 @@ use std::os::windows::process::CommandExt as _;
 
 #[path = "../exit_codes.rs"]
 mod exit_codes;
+#[path = "../runtime_redaction.rs"]
+#[allow(dead_code)]
+mod redaction;
 #[path = "../startup_diagnostics.rs"]
 mod startup_diagnostics;
 
 use startup_diagnostics::{StartupDiagnostic, parse_diagnostic};
 
 const ERROR_TITLE: &str = "Code-Codex startup problem";
-const MAX_CAPTURE_BYTES: usize = 64 * 1024;
+const MAX_CAPTURE_BYTES: usize = 256 * 1024;
 const MAX_DIALOG_DETAILS_CHARS: usize = 12 * 1024;
 const MAX_DIAGNOSTIC_REPORTS: usize = 10;
 const DIAGNOSTIC_DIRECTORY: &str = "CodeCodex\\diagnostics";
@@ -85,7 +90,7 @@ $reason.Multiline = $true
 $reason.ReadOnly = $true
 $reason.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
 $reason.BackColor = [System.Drawing.SystemColors]::Window
-$reason.Text = $env:CLE_ERROR_REASON
+$reason.Text = $env:CLE_ERROR_REASON -replace "(?<!`r)`n", "`r`n"
 $form.Controls.Add($reason)
 
 $actionTitle = New-Object System.Windows.Forms.Label
@@ -118,12 +123,16 @@ $copy.Location = New-Object System.Drawing.Point(22, 350)
 $copy.Size = New-Object System.Drawing.Size(118, 34)
 $copy.Text = 'Copy details'
 $copy.Add_Click({
-    $details = if (-not [string]::IsNullOrWhiteSpace($env:CLE_ERROR_REPORT) -and
+    $details = $script:copyDetails
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($env:CLE_ERROR_LIVE_STATE) -and [IO.File]::Exists($env:CLE_ERROR_LIVE_STATE)) {
+            $current = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($env:CLE_ERROR_LIVE_STATE))
+            $details = $current.details
+        } elseif (-not [string]::IsNullOrWhiteSpace($env:CLE_ERROR_REPORT) -and
         [IO.File]::Exists($env:CLE_ERROR_REPORT)) {
-        [IO.File]::ReadAllText($env:CLE_ERROR_REPORT)
-    } else {
-        $env:CLE_ERROR_DETAILS
-    }
+            $details = [IO.File]::ReadAllText($env:CLE_ERROR_REPORT)
+        }
+    } catch {}
     [System.Windows.Forms.Clipboard]::SetText($details)
 })
 $form.Controls.Add($copy)
@@ -150,7 +159,28 @@ $form.Controls.Add($close)
 $form.AcceptButton = $close
 $form.CancelButton = $close
 
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 150
+$script:lastLive = ''
+$script:copyDetails = $env:CLE_ERROR_DETAILS
+$timer.Add_Tick({
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($env:CLE_ERROR_LIVE_STATE) -and [IO.File]::Exists($env:CLE_ERROR_LIVE_STATE)) {
+            $raw = [IO.File]::ReadAllText($env:CLE_ERROR_LIVE_STATE)
+            if ($raw -ne $script:lastLive) {
+                $state = ConvertFrom-Json -InputObject $raw
+                $script:copyDetails = $state.details
+                $reason.Text = $state.reason -replace "(?<!`r)`n", "`r`n"
+                $action.Text = $state.guidance
+                $script:lastLive = $raw
+            }
+        }
+    } catch {}
+})
+$form.Add_FormClosed({ $timer.Stop() })
+$timer.Start()
 [void]$form.ShowDialog()
+$timer.Dispose()
 $form.Dispose()
 "#;
 
@@ -206,12 +236,62 @@ fn main() -> ExitCode {
         .stdout
         .take()
         .map(|stdout| thread::spawn(move || read_bounded_tail(stdout, MAX_CAPTURE_BYTES)));
-    let stderr_reader = child
-        .stderr
-        .take()
-        .map(|stderr| thread::spawn(move || read_bounded_tail(stderr, MAX_CAPTURE_BYTES)));
+    let live = Arc::new(Mutex::new(None::<StartupDiagnostic>));
+    let reader_live = live.clone();
+    let stderr_reader = child.stderr.take().map(|stderr| {
+        thread::spawn(move || read_live_tail(stderr, MAX_CAPTURE_BYTES, reader_live))
+    });
 
-    let status = child.wait();
+    // A failure marker arrives before expensive post-failure checks finish.
+    let live_directory = tempfile::Builder::new()
+        .prefix("CodeCodex-Error-")
+        .tempdir()
+        .ok();
+    let live_state = live_directory.as_ref().map(|d| d.path().join("state.json"));
+    let mut last = None;
+    let mut report_path = None;
+    let mut dialog = None;
+    let mut dialog_attempted = false;
+    let status = loop {
+        let next = live.lock().ok().and_then(|v| v.clone());
+        if next.is_some() && next != last {
+            let diagnostic = next.as_ref().expect("diagnostic present");
+            let report = format_report(
+                diagnostic,
+                None,
+                "Automatic checks are in progress; see Reason above.",
+                &format!(
+                    "GUI PID: {}; child PID: {}; runtime: {} ms; child still running",
+                    std::process::id(),
+                    child_pid,
+                    started.elapsed().as_millis()
+                ),
+            );
+            if report_path.is_none() {
+                report_path = persist_report(&report).ok();
+            } else if let Some(path) = report_path.as_ref() {
+                let _ = replace_report(path, report.as_bytes());
+            }
+            if let Some(path) = live_state.as_ref() {
+                let _ = write_live_state(path, diagnostic, &report);
+            }
+            if !dialog_attempted {
+                dialog_attempted = true;
+                dialog = spawn_startup_error(
+                    diagnostic,
+                    &report,
+                    report_path.as_deref(),
+                    live_state.as_deref(),
+                );
+            }
+            last = next;
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break Ok(status),
+            Err(error) => break Err(error),
+            _ => thread::sleep(Duration::from_millis(50)),
+        }
+    };
     let _stdout = join_capture(stdout_reader);
     let stderr = join_capture(stderr_reader);
     match status {
@@ -221,8 +301,19 @@ fn main() -> ExitCode {
             let stderr_text = String::from_utf8_lossy(&stderr);
             let parsed = parse_diagnostic(&stderr_text);
             let marker_present = parsed.is_some();
-            let diagnostic = parsed.unwrap_or_else(|| fallback_diagnostic(code));
-            let diagnosis = run_diagnose(&command_line);
+            let diagnostic = parsed.unwrap_or_else(|| {
+                let mut fallback = live
+                    .lock()
+                    .ok()
+                    .and_then(|v| v.clone())
+                    .unwrap_or_else(|| fallback_diagnostic(code));
+                fallback.reason.push_str(&format!(
+                    "\nUnstructured captured stderr (bounded and redacted):\n{}\n",
+                    redaction::text(&stderr_text)
+                ));
+                fallback
+            });
+            let diagnosis = "Failure-triggered automatic self-check results are included above. The launch endpoint was inspected only where ownership permitted.".to_owned();
             let report = format_report(
                 &diagnostic,
                 code,
@@ -236,8 +327,19 @@ fn main() -> ExitCode {
                     stderr.len()
                 ),
             );
-            let report_path = persist_report(&report).ok();
-            show_startup_error(&diagnostic, &report, report_path.as_deref());
+            if report_path.is_none() {
+                report_path = persist_report(&report).ok();
+            } else if let Some(path) = report_path.as_ref() {
+                let _ = replace_report(path, report.as_bytes());
+            }
+            if let Some(path) = live_state.as_ref() {
+                let _ = write_live_state(path, &diagnostic, &report);
+            }
+            if !dialog_attempted {
+                show_startup_error(&diagnostic, &report, report_path.as_deref());
+            } else if let Some(mut window) = dialog {
+                let _ = window.wait();
+            }
             ExitCode::from(normalize_failure_code(code))
         }
         Err(error) => {
@@ -248,7 +350,8 @@ fn main() -> ExitCode {
                 format!("The launcher process could not be monitored ({error})"),
                 "Run the Code-Codex installer again to repair this installation.",
             );
-            let diagnosis = run_diagnose(&command_line);
+            let diagnosis =
+                "Automatic checks will run after the initial error window is opened.".to_owned();
             let report = format_report(
                 &diagnostic,
                 None,
@@ -265,6 +368,55 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn replace_report(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let temporary = path.with_extension("tmp");
+    fs::write(&temporary, bytes)?;
+    fs::rename(temporary, path)
+}
+
+fn write_live_state(path: &Path, diagnostic: &StartupDiagnostic, details: &str) -> io::Result<()> {
+    let state = serde_json::json!({"reason":live_dialog_reason(&diagnostic.reason),"guidance":diagnostic.guidance,"details":details});
+    replace_report(path, &serde_json::to_vec(&state)?)
+}
+
+fn live_dialog_reason(reason: &str) -> String {
+    let chars: Vec<_> = reason.chars().collect();
+    if chars.len() <= MAX_DIALOG_DETAILS_CHARS {
+        return reason.to_owned();
+    }
+    let half = MAX_DIALOG_DETAILS_CHARS / 2;
+    format!(
+        "{}\n[Middle details retained in Copy details / Open report]\n{}",
+        chars[..half].iter().collect::<String>(),
+        chars[chars.len() - half..].iter().collect::<String>()
+    )
+}
+
+fn read_live_tail(
+    mut reader: impl Read,
+    limit: usize,
+    live: Arc<Mutex<Option<StartupDiagnostic>>>,
+) -> io::Result<Vec<u8>> {
+    let mut tail = Vec::new();
+    let mut buffer = [0u8; 4096];
+    loop {
+        let n = reader.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        tail.extend_from_slice(&buffer[..n]);
+        if tail.len() > limit {
+            tail.drain(..tail.len() - limit);
+        }
+        if let Some(diagnostic) = parse_diagnostic(&String::from_utf8_lossy(&tail)) {
+            if let Ok(mut state) = live.lock() {
+                *state = Some(diagnostic);
+            }
+        }
+    }
+    Ok(tail)
 }
 
 fn read_bounded_tail(mut reader: impl Read, limit: usize) -> io::Result<Vec<u8>> {
@@ -298,22 +450,48 @@ fn join_capture(reader: Option<thread::JoinHandle<io::Result<Vec<u8>>>>) -> Vec<
 fn run_diagnose(command_line: &Path) -> String {
     let mut command = Command::new(command_line);
     command
-        .arg("diagnose")
+        .args(["diagnose", "--full"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     configure_hidden(&mut command);
-    match command.output() {
-        Ok(output) => {
-            let stdout = bounded_text(&output.stdout, MAX_CAPTURE_BYTES);
+    match command.spawn() {
+        Ok(mut child) => {
+            let stdout = child
+                .stdout
+                .take()
+                .map(|r| thread::spawn(move || read_bounded_tail(r, MAX_CAPTURE_BYTES)));
+            let stderr = child
+                .stderr
+                .take()
+                .map(|r| thread::spawn(move || read_bounded_tail(r, MAX_CAPTURE_BYTES)));
+            let started = Instant::now();
+            let status = loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => break Some(status),
+                    _ if started.elapsed() >= Duration::from_secs(15) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break None;
+                    }
+                    Err(_) => break None,
+                    _ => thread::sleep(Duration::from_millis(50)),
+                }
+            };
+            let stdout = bounded_text(&join_capture(stdout), MAX_CAPTURE_BYTES);
+            let stderr = bounded_text(&join_capture(stderr), MAX_CAPTURE_BYTES);
+            if status.is_none() {
+                return format!(
+                    "Automatic self-check timed out after 15 seconds. Partial output:\n{stdout}\n{stderr}"
+                );
+            }
             if !stdout.trim().is_empty() {
                 stdout
             } else {
-                let stderr = bounded_text(&output.stderr, MAX_CAPTURE_BYTES);
                 if stderr.trim().is_empty() {
                     format!(
                         "diagnose exited with status {} and returned no details",
-                        output.status
+                        status.expect("completed")
                     )
                 } else {
                     stderr
@@ -443,9 +621,60 @@ fn normalize_failure_code(code: Option<i32>) -> u8 {
 
 #[cfg(windows)]
 fn show_startup_error(diagnostic: &StartupDiagnostic, details: &str, report_path: Option<&Path>) {
+    let state_directory = tempfile::Builder::new()
+        .prefix("CodeCodex-Error-")
+        .tempdir()
+        .ok();
+    let state_path = state_directory
+        .as_ref()
+        .map(|d| d.path().join("state.json"));
+    let mut initial = diagnostic.clone();
+    initial
+        .reason
+        .push_str("\nAutomatic self-check: running; original error retained.\n");
+    if let Some(path) = state_path.as_ref() {
+        let _ = write_live_state(path, &initial, details);
+    }
+    let window = spawn_startup_error(&initial, details, report_path, state_path.as_deref());
+    // Fallback path: the core may not even start. Keep the same window and
+    // inspect the GUI environment; missing core prevents deeper checks.
+    let mut final_diagnostic = initial;
+    let core = env::current_exe()
+        .ok()
+        .map(|p| p.with_file_name("code-codex.exe"));
+    let check = core
+        .as_ref()
+        .filter(|p| p.is_file())
+        .map(|p| run_diagnose(p))
+        .unwrap_or_else(|| {
+            "Full core checks skipped: core executable is missing or unavailable.".to_owned()
+        });
+    final_diagnostic.reason.push_str(&format!("GUI environment: local data configured={}; trusted PowerShell available={}.\n{check}\nAutomatic self-check: completed with the statuses shown above. No automatic repair was performed.\n",env::var_os("LOCALAPPDATA").is_some(),trusted_system32_executable(r"WindowsPowerShell\v1.0\powershell.exe").is_some()));
+    let report = format!(
+        "{details}\nFallback automatic checks:\n{}",
+        final_diagnostic.reason
+    );
+    if let Some(path) = report_path {
+        let _ = replace_report(path, report.as_bytes());
+    }
+    if let Some(path) = state_path.as_ref() {
+        let _ = write_live_state(path, &final_diagnostic, &report);
+    }
+    if let Some(mut child) = window {
+        let _ = child.wait();
+    }
+}
+
+#[cfg(windows)]
+fn spawn_startup_error(
+    diagnostic: &StartupDiagnostic,
+    details: &str,
+    report_path: Option<&Path>,
+    live_state: Option<&Path>,
+) -> Option<std::process::Child> {
     let Some(powershell) = trusted_system32_executable(r"WindowsPowerShell\v1.0\powershell.exe")
     else {
-        return;
+        return None;
     };
     let mut command = Command::new(powershell);
     command
@@ -460,18 +689,35 @@ fn show_startup_error(diagnostic: &StartupDiagnostic, details: &str, report_path
         .env("CLE_ERROR_SUMMARY", &diagnostic.summary)
         .env("CLE_ERROR_STAGE", &diagnostic.stage)
         .env("CLE_ERROR_CODE", &diagnostic.code)
-        .env("CLE_ERROR_REASON", &diagnostic.reason)
+        .env(
+            "CLE_ERROR_REASON",
+            bounded_dialog_details(&diagnostic.reason),
+        )
         .env("CLE_ERROR_GUIDANCE", &diagnostic.guidance)
         .env("CLE_ERROR_DETAILS", bounded_dialog_details(details))
         .env(
             "CLE_ERROR_REPORT",
             report_path.map(Path::as_os_str).unwrap_or_default(),
         )
+        .env(
+            "CLE_ERROR_LIVE_STATE",
+            live_state.map(Path::as_os_str).unwrap_or_default(),
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     configure_hidden(&mut command);
-    let _ = command.status();
+    command.spawn().ok()
+}
+
+#[cfg(not(windows))]
+fn spawn_startup_error(
+    _: &StartupDiagnostic,
+    _: &str,
+    _: Option<&Path>,
+    _: Option<&Path>,
+) -> Option<std::process::Child> {
+    None
 }
 
 #[cfg(not(windows))]
@@ -550,6 +796,70 @@ fn path_starts_with(candidate: &Path, root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streamed_failure_is_available_before_eof_and_preserves_final_copy() {
+        let first = StartupDiagnostic::new(
+            "CC-START-PROCESS-006",
+            "Identity",
+            "Failed",
+            "FIRST_FAILURE",
+            "Copy",
+        );
+        let mut final_report = first.clone();
+        final_report
+            .reason
+            .push_str("\nAutomatic self-check: completed\nFINAL_EVIDENCE");
+        let live = Arc::new(Mutex::new(None));
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("port");
+        let mut writer =
+            std::net::TcpStream::connect(listener.local_addr().expect("address")).expect("writer");
+        let reader = listener.accept().expect("reader").0;
+        let sink = live.clone();
+        let task = thread::spawn(move || read_live_tail(reader, MAX_CAPTURE_BYTES, sink));
+        use std::io::Write;
+        writeln!(writer, "{}", first.encoded_line().expect("marker")).expect("send");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while live.lock().expect("lock").is_none() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(*live.lock().expect("lock"), Some(first));
+        assert!(
+            !task.is_finished(),
+            "window data available while diagnostics still run"
+        );
+        writeln!(writer, "{}", final_report.encoded_line().expect("marker")).expect("send final");
+        drop(writer);
+        task.join().expect("join").expect("capture");
+        assert_eq!(*live.lock().expect("lock"), Some(final_report.clone()));
+        let directory = tempfile::tempdir().expect("temp");
+        let path = directory.path().join("state.json");
+        let full = format_report(&final_report, Some(1), "{}", "GUI PID: 1");
+        write_live_state(&path, &final_report, &full).expect("state");
+        let state: serde_json::Value =
+            serde_json::from_slice(&fs::read(path).expect("read")).expect("JSON");
+        assert!(
+            state["details"]
+                .as_str()
+                .expect("copy")
+                .contains("FIRST_FAILURE")
+        );
+        assert!(
+            state["details"]
+                .as_str()
+                .expect("copy")
+                .contains("FINAL_EVIDENCE")
+        );
+    }
+
+    #[test]
+    fn long_live_reason_keeps_original_and_latest_evidence() {
+        let reason = format!("FIRST_FAILURE{}FINAL_CHECK", "诊".repeat(20000));
+        let visible = live_dialog_reason(&reason);
+        assert!(visible.contains("FIRST_FAILURE"));
+        assert!(visible.contains("FINAL_CHECK"));
+        assert!(visible.contains("Middle details retained"));
+    }
     use std::io::Cursor;
 
     #[test]
@@ -591,6 +901,28 @@ mod tests {
         assert!(report.contains("Code-Codex version:"));
         assert!(report.contains("Post-failure installation check"));
         assert!(report.contains("cdp.notRequested"));
+    }
+
+    #[test]
+    fn detailed_process_report_survives_capture_and_copy_while_dialog_is_bounded() {
+        let mut reason = "过程信息\n".repeat(10_000);
+        reason.push_str("FINAL_PROCESS_QUERY_EXCEPTION");
+        let diagnostic = StartupDiagnostic::new(
+            "CC-START-PROCESS-006",
+            "Verifying the Codex process",
+            "Listener query failed",
+            reason,
+            "Copy details",
+        );
+        let encoded = diagnostic.encoded_line().expect("encoded");
+        assert!(encoded.len() > 64 * 1024);
+        let captured = read_bounded_tail(Cursor::new(encoded.as_bytes()), MAX_CAPTURE_BYTES)
+            .expect("captured");
+        let parsed = parse_diagnostic(std::str::from_utf8(&captured).expect("UTF-8"))
+            .expect("diagnostic retained");
+        let report = format_report(&parsed, Some(1), "{}", "GUI PID: 1");
+        assert!(report.contains("FINAL_PROCESS_QUERY_EXCEPTION"));
+        assert!(!bounded_dialog_details(&report).contains("FINAL_PROCESS_QUERY_EXCEPTION"));
     }
 
     #[test]

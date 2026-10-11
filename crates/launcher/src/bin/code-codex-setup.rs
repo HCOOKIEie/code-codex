@@ -22,7 +22,7 @@ const TITLE: &str = "Code-Codex setup";
 const INSTALL_SCRIPT: &str = "Install-CodeCodex.ps1";
 const FOOTER_MAGIC: &[u8; 8] = b"CLEXZIP1";
 const FOOTER_LENGTH: u64 = 24;
-const MAX_SCRIPT_DIAGNOSTIC_CHARS: usize = 4_096;
+const MAX_SCRIPT_DIAGNOSTIC_CHARS: usize = 65_536;
 const TRUNCATION_MARKER: &str = "\n[diagnostic output truncated]";
 const INSTALL_ERROR_PREFIX: &str = "CODECODEX_INSTALL_ERROR:";
 
@@ -39,6 +39,16 @@ struct InstallErrorReport {
     win32: Option<u32>,
     line: Option<u32>,
     message_base64: String,
+    #[serde(default)]
+    timeline: serde_json::Value,
+    #[serde(default)]
+    exception_chain: serde_json::Value,
+    #[serde(default)]
+    process_environment: serde_json::Value,
+    #[serde(default)]
+    category: String,
+    #[serde(default)]
+    error_id: String,
 }
 const EXPAND_ARCHIVE_SCRIPT: &str = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); try { Expand-Archive -LiteralPath $env:CLE_ARCHIVE_PATH -DestinationPath $env:CLE_DESTINATION_PATH -Force } catch { $e=$_.Exception.GetBaseException(); $hr=[Convert]::ToString($e.HResult,16).ToUpperInvariant().PadLeft(8,'0'); $detail=[ordered]@{stage='Expanding package';operation='Expand-Archive';targetName='installer payload';targetExists=$null;attempt=1;exception=$e.GetType().Name;hresult='0x'+$hr;win32=$(if($hr.StartsWith('8007')){[Convert]::ToInt32($hr.Substring(4),16)}else{$null});line=$_.InvocationInfo.ScriptLineNumber;messageBase64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($e.Message))}; [Console]::Out.WriteLine('CODECODEX_INSTALL_ERROR:'+(ConvertTo-Json -InputObject $detail -Compress)); exit 1 }"#;
 
@@ -66,6 +76,16 @@ fn main() -> ExitCode {
         5,
         env!("CARGO_PKG_VERSION"),
     );
+    // The updater owns this private rendezvous directory. Never infer readiness
+    // from process creation: the progress form must have emitted its Shown event.
+    if progress.window_ready()
+        && let Some(path) = env::var_os("CLE_UPDATE_WINDOW_READY")
+    {
+        let path = PathBuf::from(path);
+        if path.is_absolute() && path.file_name().is_some_and(|n| n == "window-ready") {
+            let _ = fs::write(path, "ready");
+        }
+    }
     match run_setup(&arguments, &mut progress) {
         Ok(output) if output.status.success() => {
             progress.set_progress_detail(
@@ -93,18 +113,90 @@ fn main() -> ExitCode {
         Ok(output) => {
             progress.close();
             let detail = format_setup_failure(output.status.code(), &output.stdout, &output.stderr);
-            gui_support::show_dialog(
-                TITLE,
-                &format!("Code-Codex setup failed:\n\n{detail}"),
-                true,
-            );
+            gui_support::show_dialog(TITLE, &setup_failure_message(&detail), true);
             ExitCode::FAILURE
         }
         Err(error) => {
             progress.close();
-            gui_support::show_dialog(TITLE, &format!("Code-Codex setup failed: {error}"), true);
+            gui_support::show_dialog(TITLE, &setup_failure_message(&error), true);
             ExitCode::FAILURE
         }
+    }
+}
+
+fn setup_failure_message(detail: &str) -> String {
+    let report = format!(
+        "Code-Codex installation diagnostic\nVersion: {}\n\n{detail}",
+        env!("CARGO_PKG_VERSION")
+    );
+    let saved = (|| -> std::io::Result<PathBuf> {
+        let root = env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .ok_or_else(|| std::io::Error::other("LOCALAPPDATA unavailable"))?
+            .join("CodeCodex/diagnostics");
+        for directory in [root.parent().expect("fixed parent"), root.as_path()] {
+            if let Ok(metadata) = fs::symlink_metadata(directory) {
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::MetadataExt;
+                    if metadata.file_attributes() & 0x400 != 0 {
+                        return Err(std::io::Error::other(
+                            "Redirected diagnostic directory refused",
+                        ));
+                    }
+                }
+                if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                    return Err(std::io::Error::other("Invalid diagnostic directory"));
+                }
+            }
+        }
+        fs::create_dir_all(&root)?;
+        let time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let path = root.join(format!("setup-{time}-{}.txt", std::process::id()));
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&path)?;
+        file.write_all(report.as_bytes())?;
+        file.sync_all()?;
+        // Scoped retention for this report family only, never recursive or following links.
+        if let Ok(entries) = fs::read_dir(&root) {
+            let mut old: Vec<_> = entries
+                .filter_map(Result::ok)
+                .filter(|e| {
+                    let name = e.file_name();
+                    let name = name.to_string_lossy();
+                    name.starts_with("setup-")
+                        && name.ends_with(".txt")
+                        && name[6..name.len() - 4]
+                            .bytes()
+                            .all(|b| b.is_ascii_digit() || b == b'-')
+                        && e.file_type().is_ok_and(|t| t.is_file() && !t.is_symlink())
+                })
+                .map(|e| e.path())
+                .collect();
+            old.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+            for old in old.into_iter().skip(10) {
+                let _ = fs::remove_file(old);
+            }
+        }
+        Ok(path)
+    })();
+    let mut visible = detail.chars().take(12_000).collect::<String>();
+    if detail.chars().count() > 12_000 {
+        visible.push_str("\n[Dialog shortened; full report retained separately]");
+    }
+    match saved {
+        Ok(path) => format!(
+            "Code-Codex setup failed:\n\n{visible}\n\nFull diagnostic report: {}",
+            path.display()
+        ),
+        Err(e) => format!(
+            "Code-Codex setup failed:\n\n{visible}\n\nDiagnostic report could not be saved: {e}"
+        ),
     }
 }
 
@@ -217,6 +309,11 @@ fn format_setup_failure(exit_code: Option<i32>, stdout: &[u8], stderr: &[u8]) ->
             report.line.map_or("unknown".to_owned(), |line| line.to_string()),
             decoded_message,
         ));
+    }
+    if let Some(report) = stdout.lines().find_map(|line| {
+        serde_json::from_str::<InstallErrorReport>(line.strip_prefix(INSTALL_ERROR_PREFIX)?).ok()
+    }) {
+        sections.push(format!("Error category: {}\nError ID: {}\nInstaller process environment:\n{}\nInstaller timeline:\n{}\nException chain (UTF-8 messages encoded in Base64):\n{}",report.category,report.error_id,serde_json::to_string_pretty(&report.process_environment).unwrap_or_default(),serde_json::to_string_pretty(&report.timeline).unwrap_or_default(),serde_json::to_string_pretty(&report.exception_chain).unwrap_or_default()));
     }
     if !stderr.is_empty() {
         sections.push(format!("PowerShell error:\n{stderr}"));
@@ -903,7 +1000,11 @@ mod tests {
 
     #[test]
     fn setup_failure_bounds_long_diagnostics() {
-        let message = format_setup_failure(Some(1), b"", &vec![b'x'; 20_000]);
+        let message = format_setup_failure(
+            Some(1),
+            b"",
+            &vec![b'x'; MAX_SCRIPT_DIAGNOSTIC_CHARS + 10_000],
+        );
 
         assert!(message.contains(TRUNCATION_MARKER.trim()));
         assert!(message.ends_with("Windows PowerShell exited with exit code 1."));

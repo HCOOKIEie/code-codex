@@ -95,18 +95,24 @@ impl WorkspaceError {
 
 pub(crate) fn map_io(error: &std::io::Error) -> WorkspaceError {
     use std::io::ErrorKind;
-    if let Some(observer) = DIAGNOSTIC_OBSERVER.get() {
-        observer(
-            "workspace",
-            "I/O",
-            "failed",
-            serde_json::json!({"ioKind":format!("{:?}",error.kind()),"osErrorCode":error.raw_os_error()}),
-        );
-    }
+    observe_io("I/O", error);
 
     match error.kind() {
         ErrorKind::NotFound => WorkspaceError::NotFound,
         ErrorKind::PermissionDenied => WorkspaceError::AccessDenied,
         _ => WorkspaceError::Internal,
+    }
+}
+
+/// Retain phase and native evidence before stable public error mapping discards it.
+pub(crate) fn observe_io(phase: &str, error: &std::io::Error) {
+    observe(
+        phase,
+        serde_json::json!({"ioKind":format!("{:?}",error.kind()),"osErrorCode":error.raw_os_error()}),
+    );
+}
+pub(crate) fn observe(phase: &str, details: serde_json::Value) {
+    if let Some(observer) = DIAGNOSTIC_OBSERVER.get() {
+        observer("workspace", phase, "failed", details);
     }
 }

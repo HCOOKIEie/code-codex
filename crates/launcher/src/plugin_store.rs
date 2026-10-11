@@ -268,11 +268,9 @@ pub(crate) fn cache_root() -> Result<PathBuf, BridgeError> {
         )
     })?;
     let root = PathBuf::from(local).join("CodeCodex").join("plugin-cache");
-    std::fs::create_dir_all(&root)
-        .map_err(|e| error("PLUGIN_CACHE", format!("Cannot prepare plugin cache: {e}")))?;
+    std::fs::create_dir_all(&root).map_err(|e| cache_io("Cannot prepare plugin cache", &e))?;
     for path in [root.clone(), root.parent().unwrap().to_path_buf()] {
-        let meta = std::fs::symlink_metadata(path)
-            .map_err(|e| error("PLUGIN_CACHE", format!("Cache metadata: {e}")))?;
+        let meta = std::fs::symlink_metadata(path).map_err(|e| cache_io("Cache metadata", &e))?;
         #[cfg(windows)]
         {
             use std::os::windows::fs::MetadataExt;
@@ -328,8 +326,8 @@ fn safe_component(value: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'.')
 }
 fn verify_directory(directory: &Path) -> Result<(), BridgeError> {
-    let meta = std::fs::symlink_metadata(directory)
-        .map_err(|e| error("PLUGIN_CACHE", format!("Plugin directory: {e}")))?;
+    let meta =
+        std::fs::symlink_metadata(directory).map_err(|e| cache_io("Plugin directory", &e))?;
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -369,7 +367,7 @@ fn verify_parents(root: &Path, file: &Path, create: bool) -> Result<(), BridgeEr
                         Err(e)
                     }
                 })
-                .map_err(|e| error("PLUGIN_CACHE", format!("Create plugin directory: {e}")))?;
+                .map_err(|e| cache_io("Create plugin directory", &e))?;
         }
         verify_directory(&parent)?;
     }
@@ -547,7 +545,10 @@ fn resource_sources(p: &Package, r: &Resource, bytes: &[u8]) -> Vec<String> {
 }
 fn read_verified_file(root: &Path, file: &Path, p: &Package) -> Result<Vec<u8>, BridgeError> {
     verify_parents(root, file, false)?;
-    let meta = std::fs::symlink_metadata(file).map_err(|_| {
+    let meta = std::fs::symlink_metadata(file).map_err(|e| {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            return cache_io("Required asset metadata", &e);
+        }
         error(
             "PLUGIN_NOT_INSTALLED",
             format!(
@@ -572,8 +573,7 @@ fn read_verified_file(root: &Path, file: &Path, p: &Package) -> Result<Vec<u8>, 
             "Cached plugin size or file type is invalid.",
         ));
     }
-    let bytes =
-        std::fs::read(file).map_err(|e| error("PLUGIN_CACHE", format!("Read plugin: {e}")))?;
+    let bytes = std::fs::read(file).map_err(|e| cache_io("Read plugin", &e))?;
     verify(p, &bytes)?;
     Ok(bytes)
 }
@@ -590,7 +590,7 @@ fn read_asset(root: &Path, p: &Package) -> Result<Vec<u8>, BridgeError> {
                 p,
                 &bytes,
                 tempfile::NamedTempFile::new_in(root)
-                    .map_err(|e| error("PLUGIN_CACHE", format!("Migration staging: {e}")))?,
+                    .map_err(|e| cache_io("Migration staging", &e))?,
             )?;
             crate::runtime_log::record(
                 "plugin-package",
@@ -632,6 +632,63 @@ fn source_available(root: &Path, p: &Package) -> bool {
         .iter()
         .find(|file| std::fs::symlink_metadata(file).is_ok())
         .is_some_and(|file| read_verified_file(root, file, p).is_ok())
+}
+/// Explicit support audit, never prepares directories or migrates user files.
+pub(crate) fn diagnostic_status() -> Result<Value, BridgeError> {
+    let local = std::env::var_os("LOCALAPPDATA")
+        .ok_or_else(|| error("PLUGIN_CACHE", "Local data directory unavailable"))?;
+    let root = PathBuf::from(local).join("CodeCodex/plugin-cache");
+    match std::fs::symlink_metadata(&root) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(json!({"cache":"absent","normalForFreshInstall":true,"created":false}));
+        }
+        Err(e) => return Err(cache_io("Audit cache metadata", &e)),
+        Ok(_) => {
+            verify_directory(&root)?;
+            verify_directory(root.parent().expect("fixed cache parent"))?;
+        }
+    }
+    let packages = catalog()?;
+    let mut checks = vec![];
+    for p in &packages {
+        let mut verified = 0;
+        let mut missing = 0;
+        let mut failures = vec![];
+        for asset in p.assets() {
+            let current = path(&root, &asset);
+            let candidate = match std::fs::symlink_metadata(&current) {
+                Ok(_) => Some(current),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => legacy_paths(&root, &asset)
+                    .into_iter()
+                    .find(|file| std::fs::symlink_metadata(file).is_ok()),
+                Err(e) => {
+                    failures.push(json!({"asset":asset.asset,"code":"PLUGIN_CACHE","ioKind":format!("{:?}",e.kind()),"osCode":e.raw_os_error()}));
+                    continue;
+                }
+            };
+            let Some(file) = candidate else {
+                missing += 1;
+                continue;
+            };
+            match read_verified_file(&root, &file, &asset) {
+                Ok(_) => verified += 1,
+                Err(e) => {
+                    let observation = json!({"id":p.id,"asset":asset.asset,"version":p.version,"code":e.code,"reason":e.message});
+                    crate::runtime_log::record(
+                        "plugin-cache",
+                        "asset audit",
+                        "failed",
+                        observation.clone(),
+                    );
+                    failures.push(observation)
+                }
+            }
+        }
+        checks.push(json!({"id":p.id,"category":p.category,"version":p.version,"verifiedAssets":verified,"missingAssets":missing,"failedAssets":failures.len(),"failures":failures,"dependencies":p.dependencies,"state":if !failures.is_empty(){"invalid"}else if missing>0{"not fully downloaded"}else{"own assets verified"}}));
+    }
+    Ok(
+        json!({"cache":"audited","packages":checks,"readOnly":true,"interpretation":"Own assets and dependencies are reported separately. Missing downloads are normal; verified does not prove loaded or enabled."}),
+    )
 }
 pub(crate) fn cancel(id: &str) -> Result<Value, BridgeError> {
     package(id)?;
@@ -905,8 +962,8 @@ async fn receive_asset(
         "started",
         json!({"id":p.id,"asset":p.asset}),
     );
-    let staging = tempfile::NamedTempFile::new_in(&root)
-        .map_err(|e| error("PLUGIN_CACHE", format!("Plugin staging: {e}")))?;
+    let staging =
+        tempfile::NamedTempFile::new_in(&root).map_err(|e| cache_io("Plugin staging", &e))?;
     let mut bytes = Vec::with_capacity(p.size);
     let mut transfer = crate::network_diagnostics::TransferProgress::new();
     while let Some(chunk) = response.chunk().await.map_err(|e| {
@@ -964,12 +1021,12 @@ fn commit(
     staging
         .write_all(bytes)
         .and_then(|()| staging.as_file().sync_all())
-        .map_err(|e| error("PLUGIN_CACHE", format!("Write plugin staging: {e}")))?;
+        .map_err(|e| cache_io("Write plugin staging", &e))?;
     let destination = path(root, p);
     verify_parents(root, &destination, true)?;
     if destination.exists() {
         let meta = std::fs::symlink_metadata(&destination)
-            .map_err(|e| error("PLUGIN_CACHE", format!("Invalid cache metadata: {e}")))?;
+            .map_err(|e| cache_io("Invalid cache metadata", &e))?;
         #[cfg(windows)]
         {
             use std::os::windows::fs::MetadataExt;
@@ -986,13 +1043,12 @@ fn commit(
                 "Cannot replace a non-regular cache file.",
             ));
         }
-        let existing = std::fs::read(&destination)
-            .map_err(|e| error("PLUGIN_CACHE", format!("Existing plugin: {e}")))?;
+        let existing = std::fs::read(&destination).map_err(|e| cache_io("Existing plugin", &e))?;
         if verify(p, &existing).is_ok() {
             return Ok(());
         }
         std::fs::remove_file(&destination)
-            .map_err(|e| error("PLUGIN_CACHE", format!("Remove damaged plugin cache: {e}")))?;
+            .map_err(|e| cache_io("Remove damaged plugin cache", &e))?;
         crate::runtime_log::record(
             "plugin-package",
             "cache repair",
@@ -1004,7 +1060,7 @@ fn commit(
         // A second Code-Codex process may have committed the same immutable
         // package first. Accept only an independently verified regular winner.
         if !source_available(root, p) {
-            return Err(error("PLUGIN_CACHE", format!("Commit plugin: {e}")));
+            return Err(cache_io("Commit plugin", &e.error));
         }
     }
     Ok(())
@@ -1066,7 +1122,7 @@ pub(crate) fn import_directory(directory: &Path) -> Result<Value, BridgeError> {
                 &p,
                 &bytes,
                 tempfile::NamedTempFile::new_in(&root)
-                    .map_err(|e| error("PLUGIN_CACHE", format!("Import staging: {e}")))?,
+                    .map_err(|e| cache_io("Import staging", &e))?,
             )?;
         }
         imported.push(p.id);
@@ -1506,4 +1562,20 @@ mod tests {
         .unwrap();
         assert_eq!(std::fs::read(test_path(root.path(), &p)).unwrap(), bytes);
     }
+}
+
+fn cache_io(phase: &str, error: &std::io::Error) -> BridgeError {
+    crate::runtime_log::record(
+        "plugin-cache",
+        phase,
+        "failed",
+        json!({"code":"PLUGIN_CACHE","ioKind":format!("{:?}",error.kind()),"osErrorCode":error.raw_os_error(),"errorChain":crate::network_diagnostics::error_details(error)["errorChain"]}),
+    );
+    BridgeError::new(
+        "PLUGIN_CACHE",
+        format!(
+            "{phase}: {}",
+            crate::network_diagnostics::error_message(error)
+        ),
+    )
 }

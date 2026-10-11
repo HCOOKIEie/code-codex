@@ -1,6 +1,38 @@
+## 本地维护 v0.4.9 / Local maintenance v0.4.9
+
+当前本地维护版 **0.4.9**：启动失败后保留现有报错窗口布局，尽快显示首次错误，自动追加有十五秒预算的自检过程、结果和恢复评估；Copy details 与本地报告保留原始错误及后续记录。更新界面连续显示下载、校验和安装窗口交接阶段，只有收到窗口显示确认才提示已打开，并区分提前退出与未确认；更新请求时限与后台下载对齐。尚未 GitHub 发布，公开下载仍为 v0.4.4；插件资源继续复用 v0.3.96，不更改用户参数或缓存。
+
+Local maintenance version **0.4.9** preserves the startup error dialog layout, presents the first failure promptly and appends automatic checks, outcomes and recovery assessment under a fifteen-second budget. Copy details and saved reports retain the original error and subsequent evidence. Updates show download, verification and installer-window handoff continuously; window readiness requires an explicit acknowledgement, and early exit is distinguished from an unconfirmed window. The UI request deadline now matches the native download budget. Not yet published; public downloads remain v0.4.4 and plugin assets remain pinned to v0.3.96. User preferences and caches are preserved.
+
+## 本地维护 v0.4.8 / Local maintenance v0.4.8
+
+补齐可观察故障链路：统一故障解释、已处理异常、只读 Run Checks、网络/系统/界面/资源/存储证据及安装失败完整报告。诊断结果区分事实、辅助检查和未知，不声称所有外部故障均已修复。当前尚未 GitHub 发布，插件仍复用公开 v0.3.96；用户缓存和参数保留。
+
+Extends observable failure paths with shared fault interpretation, handled exceptions, read-only Run Checks, network/system/renderer/resource/storage evidence and complete installation failure reports. Facts, auxiliary probes and unknowns remain distinct; this does not claim every external fault is fixed. Not yet published; plugin assets reuse public v0.3.96 and user caches/preferences are retained.
+
 # Releases
 
 This folder contains ready-made downloadable packages.
+
+## v0.4.5 — 进程验证与启动检错增强（本地维护版）
+
+### 简体中文
+
+- 分开记录进程身份、端口查询、CIM快照、时间转换、JSON解析及身份判定，保留异常类别/原因链、HRESULT、系统错误码与嵌入脚本行号。
+- 记录环境、耗时、输出大小/截断、超时和第一失败；暂态查询仅重试一次，不跳过身份或归属校验。
+- 查询失败时增加独立Win32监听PID/父进程链、创建/退出时间和可取得的退出码，观察不自动证明进程交接或崩溃。
+- 包激活保留编译/激活/监督异常及清理HRESULT；修正尚未进入renderer supervisor时的失败标签。
+- Copy details与Runtime Information共享脱敏记录，扩展GUI捕获容量；最近10次/每次5MiB不变。
+- 仅本地构建安装，尚未GitHub发布；24插件仍复用公开v0.3.96资产，缓存/参数保持。
+
+### English
+
+- Separates process identity, listener query, CIM snapshot, timestamp conversion, JSON parsing and verification, retaining exception categories/causes, HRESULTs, OS codes and embedded-script line numbers.
+- Records environment, timings, output/truncation, timeouts and the first failure. Transient queries retry once; identity and ownership checks are never bypassed.
+- Adds independent Win32 owner/parent, creation/exit time and available exit-code observations. These do not authorize attachment or prove a handoff/crash.
+- Captures package compilation/activation/supervision exceptions and cleanup HRESULTs; corrects failure labels before the renderer supervisor starts.
+- Shares redacted Copy details/Runtime Information observations and increases GUI capture capacity; latest 10 runs / 5 MiB remain.
+- Local build/install only, not published to GitHub. All 24 plugins retain public v0.3.96 assets and existing caches/preferences.
 
 ## v0.4.4 — 运行诊断增强与启动版本提示
 

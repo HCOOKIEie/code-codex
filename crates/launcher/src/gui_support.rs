@@ -630,6 +630,10 @@ impl ProgressDialog {
         self.state_path.as_deref()
     }
 
+    pub(crate) fn window_ready(&self) -> bool {
+        self.child.is_some()
+    }
+
     pub(crate) fn set_marquee(&mut self, message: &str) {
         self.send("marquee", 0, message);
     }

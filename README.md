@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.4.4-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.4.9-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -28,11 +28,11 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 
 ![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
 
-当前版本 **0.4.4**：增强 Runtime Information 的下载完整过程、耗时、错误原因链及操作关联，同时补全 Bridge、App Server、文件树、预览、插件加载和更新记录；复制/导出失败会停止，防止交付旧日志。保留最近10次运行、每次最多5MiB及脱敏。继续保留启动版本反馈：启动后后台检查一次 GitHub 更新。有更新时，底部短暂显示最新版本号，彩虹淡入、停留 1.5 秒后淡出，恢复当前版本并保留更新圆点；点击可打开更新窗口。已是最新版时短暂显示绿色确认；网络失败只作中性提示，保留手动检查。升级保留已有插件缓存和参数。已发布 [GitHub v0.4.4](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.4)。
+当前本地维护版 **0.4.9**：启动失败后保留现有报错窗口布局，尽快显示首次错误，自动追加有十五秒预算的自检过程、结果和恢复评估；Copy details 与本地报告保留原始错误及后续记录。更新界面连续显示下载、校验和安装窗口交接阶段，只有收到窗口显示确认才提示已打开，并区分提前退出与未确认；更新请求时限与后台下载对齐。尚未 GitHub 发布，公开下载仍为 v0.4.4；插件资源继续复用 v0.3.96，不更改用户参数或缓存。
 
 ## 安装方式一：直接下载 EXE
 
-推荐从 [GitHub Release v0.4.4](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.4) 下载安装包；仓库中的 [`releases`](releases/) 保留对应构建文件：
+推荐从 [GitHub Release v0.4.4](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.4) 下载安装包；本地 [`releases`](releases/) 为当前源码的构建结果，可能领先于已发布版本：
 
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
@@ -86,7 +86,7 @@ Get-FileHash .\CodeCodex-0.4.4-x64-setup.exe -Algorithm SHA256
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.4
+./scripts/package.ps1 -Version 0.4.9
 ```
 
 生成结果会写入 `releases/`。
