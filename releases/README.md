@@ -1,10 +1,83 @@
-## 本地维护 v0.4.18 / Local maintenance v0.4.18
+## v0.4.18 — 安装、诊断、集中存储与绿色升级提示
 
-有新版可升级时，版本号右侧保留低调的绿色小箭头；已是最新版时不显示箭头。保留启动版本彩虹反馈和点击更新行为。尚未GitHub发布，24插件资源继续pin v0.3.96。
+## 简体中文
 
-An available update retains a subdued green arrow beside the installed version; an up-to-date version has no arrow. Startup rainbow feedback and update clicks remain. Not published to GitHub; all 24 plugins retain v0.3.96 assets.
+本版替代已撤回的 v0.4.17，保留其全部改进并加入版本升级提示。汇总自 v0.4.4 以来的维护改进：更详细的启动与安装诊断、可选择目录的集中存储，以及更清晰、紧凑的白色品牌安装向导。
 
-## v0.4.17 — 集中存储、安装向导与诊断增强
+### 更新内容
+
+- 有新版可升级时，当前版本号右侧显示低调的绿色小箭头；已经是最新版时不显示箭头。保留自动检查及彩虹版本切换提示。
+- 启动失败保留原始错误及过程记录，并自动执行限时只读自检；完整结果可复制。进程身份、监听端口、网络、连接、界面、资源和存储检查区分已观察事实与无法确认的信息，不跳过身份或归属验证。
+- 增加安装向导过程日志、进程输出、心跳与完成页确认。安装失败在同一窗口显示完整诊断，窗口不可用时独立提示；完成页通信失败不会回滚已成功的安装。
+- 程序、插件、设置、个人素材和日志按固定子目录集中保存。首次 EXE 安装可选择专用本地文件夹；旧数据校验后复制迁移，原来源保留，普通卸载保留用户数据。
+- 安装窗口保持宽度，整体宽高比调整为 3∶1.8，使用原生 DPI 绘制文字和控件。首次安装：Welcome → License Agreement → Installation Folder → Installing → Finish；新版文件树内更新：Installing → Finish。
+- 更新过程中显示下载、启动安装器和等待安装窗口的状态，减少安装窗口出现前的空白反馈。
+
+### 升级说明
+
+- 推荐使用 EXE；已有安装沿用原目录。公开 v0.4.4 的更新入口没有新版标记，首次升级到本版会走完整向导，这是预期兼容流程；安装本版后，后续文件树内更新使用简化流程。
+- 已下载插件继续复用 v0.3.96 的资源，不因主程序升级而要求全部重新下载。本次仅发布核心安装资产；旧插件 Release 必须继续保留。
+- 默认目录为 `%LOCALAPPDATA%\Programs\Code-Codex`。官方 Codex 账号、聊天和项目文件不属于 Code-Codex 数据迁移范围。
+- MSI 与 EXE 安装方式不要混用覆盖；MSI 用户如要切换 EXE，先通过 Windows“已安装的应用”卸载 MSI，保留数据后再安装。
+
+### 验证与兼容范围
+
+- 本版：UI 类型检查、生产构建、20 项生产 UI 浏览器检查及锁定依赖的 Rust release 构建通过；实际 EXE 本机 v0.4.17 → v0.4.18 更新完成，直接 Installing → Finish。五组件摘要匹配，65 个插件和数据文件摘要保持，运行中的官方客户端保持。
+- 继承的安装/诊断实现已在 v0.4.17 候选验证：461 项 Rust 测试通过、3 项既有测试忽略，12 项生产 WinForms 用例和合成 DPI 检查通过，实际 EXE 取消、失败自检及报告复制通过。这些历史测试本版没有重复执行。
+- 发布前重新核对全部 46 项本地资产、42 项不变插件资产及安装包白名单；本版仅上传五个核心附件。
+- Windows x64；本机官方包观察版本为 26.1007.2314.0。尚未实测公开 v0.4.4 的实际升级、完整网络点击更新链路、独立 MSI 交互、真实跨显示器 DPI 切换及远端电脑冷启动。
+
+### 下载
+
+- 推荐安装器：`CodeCodex-0.4.18-x64-setup.exe`
+- MSI：`CodeCodex-0.4.18-x64.msi`
+- ZIP：`CodeCodex-0.4.18-x64.zip`
+- 独立卸载器：`Uninstall-CodeCodex.exe`
+- 核心校验清单：`SHA256SUMS.txt`，仅列本次四个核心附件。下载后计算 SHA-256 并与同名条目比较。
+
+## English
+
+This release replaces the withdrawn v0.4.17, retaining its improvements and adding an update indicator. It combines maintenance improvements since v0.4.4: richer startup and installation diagnostics, centralized storage with a selectable folder, and a clearer, compact white branded setup wizard.
+
+### Changes
+
+- A subdued green arrow appears beside the current version only when a newer version is available. Up-to-date versions show no arrow. Automatic checks and the rainbow version transition remain.
+- Startup failures retain the original error and trace, then run bounded read-only checks automatically. Full results are copyable. Process identity, listener ownership, network, connection, renderer, resource and storage checks distinguish observations from unknowns; identity and ownership verification are not bypassed.
+- Installer logs include UI process output, heartbeat and completion acknowledgements. Failed installs show a full report in the same window, with independent fallback. Completion-window communication failure does not roll back a successful installation.
+- Programs, plugins, preferences, personal media and logs use fixed subfolders under the selected root. First EXE installations can choose a dedicated local folder; verified legacy data is copied with originals retained. Normal uninstall preserves user data.
+- Setup keeps its width and uses a 3:1.8 overall aspect ratio with native DPI text and controls. First install: Welcome → License Agreement → Installation Folder → Installing → Finish. New in-app updater: Installing → Finish.
+- Update feedback covers downloading, starting the installer and waiting for its window, reducing the silent handoff interval.
+
+### Upgrade
+
+- EXE is recommended; existing installations retain their folder. The public v0.4.4 updater has no new update marker, so its first upgrade to this version uses the full wizard as the expected compatibility path. Subsequent in-app updates from this version use the shorter flow.
+- Downloaded plugins continue to use v0.3.96 resources without a forced full redownload. Only core installation assets are published here; keep the older plugin release available.
+- Default root: `%LOCALAPPDATA%\Programs\Code-Codex`. Official Codex accounts, chats and project files are outside this migration.
+- Do not overlay MSI and EXE installations. To switch from MSI to EXE, first uninstall the MSI through Windows Installed Apps, retaining data, then install the EXE.
+
+### Validation and compatibility
+
+- This version passed UI type checking, production builds, 20 production UI browser checks and the dependency-locked Rust release build. An actual local EXE update from v0.4.17 to v0.4.18 completed through Installing → Finish. Five component hashes matched, all 65 plugin and data file hashes were retained, and the running official client was preserved.
+- The inherited installation/diagnostic implementation was validated in the v0.4.17 candidate: 461 Rust tests passed, 3 existing tests ignored, 12 production WinForms cases and synthetic DPI checks passed, along with actual EXE cancellation, failure checks and report copying. Those historical tests were not repeated for this version.
+- Publication preflight rechecks all 46 local assets, 42 unchanged plugin assets and the installation package whitelist. This release uploads only five core attachments.
+- Windows x64; observed official package on this machine: 26.1007.2314.0. Actual public v0.4.4 upgrades, the full network-to-update-click chain, independent MSI interaction, physical cross-monitor DPI changes and remote-computer cold starts remain untested.
+
+### Downloads
+
+- Recommended: `CodeCodex-0.4.18-x64-setup.exe`
+- MSI: `CodeCodex-0.4.18-x64.msi`
+- ZIP: `CodeCodex-0.4.18-x64.zip`
+- Standalone uninstaller: `Uninstall-CodeCodex.exe`
+- Core checksums: `SHA256SUMS.txt`, listing only these four uploaded core files. Compute SHA-256 and compare it with the matching entry.
+
+**Full changelog:** https://github.com/Rice-dog/code-codex/compare/v0.4.4...v0.4.18
+
+
+发布 / Publication: [GitHub Latest v0.4.18](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.18), [PR #51](https://github.com/Rice-dog/code-codex/pull/51), main `19f5523`. 五个核心附件公开下载 SHA-256 与大小已核验；包内 README 保留构建时快照，公开说明单独同步。 / Public SHA-256 and sizes verified for all five core attachments; bundled READMEs retain the build-time snapshot, with repository publication notes synchronized separately.
+
+## v0.4.17 — 集中存储、安装向导与诊断增强（已撤回 / Withdrawn）
+
+2026-10-11：已转为草稿，累计内容及新增绿色升级提示由 v0.4.18 取代。标签和附件保留用于历史恢复。 / Converted to draft and superseded by v0.4.18, retaining its improvements and adding the green update indicator. The tag and assets remain available for historical recovery.
 
 ### 简体中文
 

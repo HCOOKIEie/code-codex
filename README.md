@@ -28,26 +28,26 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 
 ![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
 
-当前本地维护版 **0.4.18**：有新版可升级时，版本号右侧显示低调的绿色小箭头；已是最新版时不显示箭头。公开下载仍为 v0.4.17。
+有新版可升级时，版本号右侧显示低调的绿色小箭头；已是最新版时不显示箭头。v0.4.18 合并原 v0.4.17 的全部改进并增加此提示；原 v0.4.17 已撤回为草稿。
 
-当前公开版本 **0.4.17**：新增集中目录方案。EXE 首次安装可选择默认用户目录或自定义本地文件夹；程序版本、插件、设置、用户素材、日志和临时文件按固定子目录保存，更新沿用原目录。旧设置/下载资源/日志通过校验后复制迁移，旧来源保留；普通卸载保留用户数据，明确清除时只移除本产品的已知目录。插件参数与个人图片/视频同步保存到本机文件，官方账号和聊天数据不纳入迁移。安装向导新增完整过程日志、完成页确认及心跳检查；失败时自动运行限时只读自检，在同一窗口展示和复制完整报告，窗口不可用时使用独立错误提示。安装成功后的完成页通信失败单独标记，不回滚已安装版本。已发布为 [GitHub Release v0.4.17](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.17)；插件资源继续复用 v0.3.96。
+当前公开版本 **0.4.18**：新增集中目录方案。EXE 首次安装可选择默认用户目录或自定义本地文件夹；程序版本、插件、设置、用户素材、日志和临时文件按固定子目录保存，更新沿用原目录。旧设置/下载资源/日志通过校验后复制迁移，旧来源保留；普通卸载保留用户数据，明确清除时只移除本产品的已知目录。插件参数与个人图片/视频同步保存到本机文件，官方账号和聊天数据不纳入迁移。安装向导新增完整过程日志、完成页确认及心跳检查；失败时自动运行限时只读自检，在同一窗口展示和复制完整报告，窗口不可用时使用独立错误提示。安装成功后的完成页通信失败单独标记，不回滚已安装版本。已发布为 [GitHub Release v0.4.18](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.18)；插件资源继续复用 v0.3.96。
 
 ## 安装方式一：直接下载 EXE
 
-推荐从 [GitHub Release v0.4.17](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.17) 下载安装包；[`releases`](releases/) 保留对应构建资产：
+推荐从 [GitHub Release v0.4.18](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.18) 下载安装包；[`releases`](releases/) 保留对应构建资产：
 
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.4.17-x64-setup.exe`
-- 备选：`CodeCodex-0.4.17-x64.msi`
-- 便携包：`CodeCodex-0.4.17-x64.zip`
+- 推荐：`CodeCodex-0.4.18-x64-setup.exe`
+- 备选：`CodeCodex-0.4.18-x64.msi`
+- 便携包：`CodeCodex-0.4.18-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.4.17-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.4.18-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -61,7 +61,7 @@ Get-FileHash .\CodeCodex-0.4.17-x64-setup.exe -Algorithm SHA256
 
 ### 集中目录与自定义安装
 
-EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整体窗口宽高比为3∶1.8，按实际屏幕 DPI 绘制文字和按钮，品牌图保持比例：Welcome → License Agreement → Installation Folder → Installing → Finish。阅读并同意 MIT 协议后，进入目录页；勾选 Custom installation 展开地址栏，点击 Install 后在同一窗口连续安装，成功后点击 Finish 关闭。默认 `%LOCALAPPDATA%\Programs\Code-Codex`，也可选择其他固定本地盘中的专用文件夹。已安装时更新沿用该目录；本版及以后版本的应用内自动更新在同一品牌窗口直接显示 Installing → Finish，跳过欢迎、协议和目录页。旧公开版 v0.4.4 首次升级到本版会显示完整向导，沿用原目录；这是预期兼容流程，尚未实际执行该旧版升级测试。需要搬迁时先普通卸载保留数据，再安装到新目录，安装器会复制保留的数据并保留原来源。MSI 可使用 `msiexec /i CodeCodex-0.4.17-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"` 指定目录。
+EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整体窗口宽高比为3∶1.8，按实际屏幕 DPI 绘制文字和按钮，品牌图保持比例：Welcome → License Agreement → Installation Folder → Installing → Finish。阅读并同意 MIT 协议后，进入目录页；勾选 Custom installation 展开地址栏，点击 Install 后在同一窗口连续安装，成功后点击 Finish 关闭。默认 `%LOCALAPPDATA%\Programs\Code-Codex`，也可选择其他固定本地盘中的专用文件夹。已安装时更新沿用该目录；本版及以后版本的应用内自动更新在同一品牌窗口直接显示 Installing → Finish，跳过欢迎、协议和目录页。旧公开版 v0.4.4 首次升级到本版会显示完整向导，沿用原目录；这是预期兼容流程，尚未实际执行该旧版升级测试。需要搬迁时先普通卸载保留数据，再安装到新目录，安装器会复制保留的数据并保留原来源。MSI 可使用 `msiexec /i CodeCodex-0.4.18-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"` 指定目录。
 
 - `versions/`：不可变程序版本；`integration/`：快捷方式与安装事务。
 - `data/`：文件树设置、插件参数与用户图片/视频；官方 Codex 账号、聊天、项目文件仍由官方客户端管理。
