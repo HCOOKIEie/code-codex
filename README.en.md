@@ -31,24 +31,24 @@ editing, navigation, and file operations.
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
 
-Local maintenance version **0.4.17** adds centralized storage and a first-install folder chooser. Updates reuse the selected location. Verified migration copies old settings, plugin resources and logs while retaining their originals. Normal uninstall keeps user data; explicit purge removes only known product paths. Code-Codex preferences and personal media gain native persistence without moving official accounts or chats. Installer UI logs now retain process output and communication details, acknowledge completion pages and monitor responsiveness. Failures trigger bounded read-only checks and a copyable full report, with independent dialog fallback. Completion-window failures are distinguished from installation failures and do not roll back a successful installation. Not yet published; public downloads remain v0.4.4 and plugin assets remain pinned to v0.3.96.
+Version **0.4.17** adds centralized storage and a first-install folder chooser. Updates reuse the selected location. Verified migration copies old settings, plugin resources and logs while retaining their originals. Normal uninstall keeps user data; explicit purge removes only known product paths. Code-Codex preferences and personal media gain native persistence without moving official accounts or chats. Installer UI logs now retain process output and communication details, acknowledge completion pages and monitor responsiveness. Failures trigger bounded read-only checks and a copyable full report, with independent dialog fallback. Completion-window failures are distinguished from installation failures and do not roll back a successful installation. Published as [GitHub Release v0.4.17](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.17); plugin assets remain pinned to v0.3.96.
 
 ## Install Option 1: Download EXE
 
-Download the installer from [GitHub Release v0.4.4](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.4). Local [`releases`](releases/) contains builds of the current source and may be ahead of the published version:
+Download the installer from [GitHub Release v0.4.17](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.17). [`releases`](releases/) retains the corresponding build assets:
 
 Runtime requirement: Windows 10 version 2004 (build 19041) or newer, x64,
 with the official stable Codex/ChatGPT Desktop app installed.
 
-- Recommended: `CodeCodex-0.4.4-x64-setup.exe`
-- Alternative: `CodeCodex-0.4.4-x64.msi`
-- Portable package: `CodeCodex-0.4.4-x64.zip`
+- Recommended: `CodeCodex-0.4.17-x64-setup.exe`
+- Alternative: `CodeCodex-0.4.17-x64.msi`
+- Portable package: `CodeCodex-0.4.17-x64.zip`
 - Standalone uninstaller: `Uninstall-CodeCodex.exe`
 
 You can verify downloads with:
 
 ```powershell
-Get-FileHash .\CodeCodex-0.4.4-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.4.17-x64-setup.exe -Algorithm SHA256
 ```
 
 Compare the result with [`SHA256SUMS.txt`](releases/SHA256SUMS.txt).
@@ -295,9 +295,9 @@ workflows are not included in this public source package.
 
 [MIT](LICENSE). See the [third-party notices](THIRD_PARTY_NOTICES_EN.md) for effect provenance, Code-Codex modifications, and license boundaries.
 
-## Centralized storage (local v0.4.17)
+## Centralized storage
 
-The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.4.17-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
+The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates from this version or later show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. The public v0.4.4 updater uses the full wizard for its first upgrade to this version and retains the original folder; this is the expected compatibility flow, but an actual upgrade from that old release has not been tested. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.4.17-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
 
 Program versions live in `versions/`, integration state in `integration/`, preferences and personal images/videos in `data/`, verified downloadable plugins in `plugins/<category>/<id>/<version>/`, diagnostic and runtime reports in `logs/`, update temporary files in `temp/`, and migration records in `backups/`. Only a small location pointer lives in the current-user registry. Official Codex accounts, chats and workspace files are outside this storage contract. Browser storage remains a rendering cache; Code-Codex preferences and personal media have native persistence.
 
