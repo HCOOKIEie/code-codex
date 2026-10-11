@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.17-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.18-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -31,7 +31,9 @@ editing, navigation, and file operations.
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
 
-Version **0.4.17** adds centralized storage and a first-install folder chooser. Updates reuse the selected location. Verified migration copies old settings, plugin resources and logs while retaining their originals. Normal uninstall keeps user data; explicit purge removes only known product paths. Code-Codex preferences and personal media gain native persistence without moving official accounts or chats. Installer UI logs now retain process output and communication details, acknowledge completion pages and monitor responsiveness. Failures trigger bounded read-only checks and a copyable full report, with independent dialog fallback. Completion-window failures are distinguished from installation failures and do not roll back a successful installation. Published as [GitHub Release v0.4.17](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.17); plugin assets remain pinned to v0.3.96.
+Local maintenance version **0.4.18** shows a subdued green arrow beside the version when an update is available; an up-to-date version has no arrow. Public downloads remain v0.4.17.
+
+Public version **0.4.17** adds centralized storage and a first-install folder chooser. Updates reuse the selected location. Verified migration copies old settings, plugin resources and logs while retaining their originals. Normal uninstall keeps user data; explicit purge removes only known product paths. Code-Codex preferences and personal media gain native persistence without moving official accounts or chats. Installer UI logs now retain process output and communication details, acknowledge completion pages and monitor responsiveness. Failures trigger bounded read-only checks and a copyable full report, with independent dialog fallback. Completion-window failures are distinguished from installation failures and do not roll back a successful installation. Published as [GitHub Release v0.4.17](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.17); plugin assets remain pinned to v0.3.96.
 
 ## Install Option 1: Download EXE
 
@@ -91,7 +93,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.17
+./scripts/package.ps1 -Version 0.4.18
 ```
 
 The generated packages are written to `releases/`.

@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.4.17-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.4.18-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -28,7 +28,9 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 
 ![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
 
-当前版本 **0.4.17**：新增集中目录方案。EXE 首次安装可选择默认用户目录或自定义本地文件夹；程序版本、插件、设置、用户素材、日志和临时文件按固定子目录保存，更新沿用原目录。旧设置/下载资源/日志通过校验后复制迁移，旧来源保留；普通卸载保留用户数据，明确清除时只移除本产品的已知目录。插件参数与个人图片/视频同步保存到本机文件，官方账号和聊天数据不纳入迁移。安装向导新增完整过程日志、完成页确认及心跳检查；失败时自动运行限时只读自检，在同一窗口展示和复制完整报告，窗口不可用时使用独立错误提示。安装成功后的完成页通信失败单独标记，不回滚已安装版本。已发布为 [GitHub Release v0.4.17](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.17)；插件资源继续复用 v0.3.96。
+当前本地维护版 **0.4.18**：有新版可升级时，版本号右侧显示低调的绿色小箭头；已是最新版时不显示箭头。公开下载仍为 v0.4.17。
+
+当前公开版本 **0.4.17**：新增集中目录方案。EXE 首次安装可选择默认用户目录或自定义本地文件夹；程序版本、插件、设置、用户素材、日志和临时文件按固定子目录保存，更新沿用原目录。旧设置/下载资源/日志通过校验后复制迁移，旧来源保留；普通卸载保留用户数据，明确清除时只移除本产品的已知目录。插件参数与个人图片/视频同步保存到本机文件，官方账号和聊天数据不纳入迁移。安装向导新增完整过程日志、完成页确认及心跳检查；失败时自动运行限时只读自检，在同一窗口展示和复制完整报告，窗口不可用时使用独立错误提示。安装成功后的完成页通信失败单独标记，不回滚已安装版本。已发布为 [GitHub Release v0.4.17](https://github.com/Rice-dog/code-codex/releases/tag/v0.4.17)；插件资源继续复用 v0.3.96。
 
 ## 安装方式一：直接下载 EXE
 
@@ -99,7 +101,7 @@ EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整�
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.17
+./scripts/package.ps1 -Version 0.4.18
 ```
 
 生成结果会写入 `releases/`。
