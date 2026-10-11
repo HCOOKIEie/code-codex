@@ -1,8 +1,8 @@
-## 本地维护 v0.4.9 / Local maintenance v0.4.9
+## 本地维护 v0.4.17 / Local maintenance v0.4.17
 
-当前本地维护版 **0.4.9**：启动失败后保留现有报错窗口布局，尽快显示首次错误，自动追加有十五秒预算的自检过程、结果和恢复评估；Copy details 与本地报告保留原始错误及后续记录。更新界面连续显示下载、校验和安装窗口交接阶段，只有收到窗口显示确认才提示已打开，并区分提前退出与未确认；更新请求时限与后台下载对齐。尚未 GitHub 发布，公开下载仍为 v0.4.4；插件资源继续复用 v0.3.96，不更改用户参数或缓存。
+当前本地维护版 **0.4.17**：保持720逻辑像素客户区宽、整体宽高比3∶1.8的紧凑白色品牌安装向导按实际 DPI 绘制文字和控件，等比显示原始冰蓝背景，图标控制显示尺寸避免放大模糊，同一窗口依次显示 Welcome、License Agreement、Installation Folder、Installing、Finish。未同意 MIT 协议不能继续，Install 前不解包，完成后点击 Finish 关闭。已有安装锁定原目录；文件树内更新直接显示安装进度，完成后在同一品牌窗口显示Finish，跳过欢迎、协议和目录页。沿用集中目录迁移、参数与素材保存、完整错误报告及安装窗口交接机制。新增安装向导过程日志、stdout/stderr捕获、完成确认、心跳与失败后限时只读自检；同窗完整报告可复制，窗口不可用时独立提示。安装成功但完成UI失败不回滚。尚未 GitHub 发布，公开下载仍为 v0.4.4；插件资源继续复用 v0.3.96。
 
-Local maintenance version **0.4.9** preserves the startup error dialog layout, presents the first failure promptly and appends automatic checks, outcomes and recovery assessment under a fifteen-second budget. Copy details and saved reports retain the original error and subsequent evidence. Updates show download, verification and installer-window handoff continuously; window readiness requires an explicit acknowledgement, and early exit is distinguished from an unconfirmed window. The UI request deadline now matches the native download budget. Not yet published; public downloads remain v0.4.4 and plugin assets remain pinned to v0.3.96. User preferences and caches are preserved.
+Local maintenance version **0.4.17** uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard with native per-monitor DPI text and controls, aspect-preserving original icy-blue artwork, and a smaller original icon. Welcome, License Agreement, Installation Folder, Installing and Finish share one window. MIT License acceptance is required, extraction starts only after Install, and Finish closes the completed wizard. Existing installations keep their folder; in-app updates show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. Centralized storage migration, preference/media persistence, detailed failure reports and window-ready acknowledgement remain. Adds installer UI process records, bounded stdout/stderr capture, completion acknowledgements, heartbeat monitoring and bounded read-only failure checks. Full reports are copyable in the wizard, with independent dialog fallback. Completion UI failure does not roll back a successful install. Not yet published; public downloads remain v0.4.4 and plugin assets remain pinned to v0.3.96.
 
 ## 本地维护 v0.4.8 / Local maintenance v0.4.8
 
@@ -1645,3 +1645,5 @@ The same files can be regenerated from source with:
 ```powershell
 ./scripts/package.ps1 -Version 0.1.106
 ```
+
+本地 v0.4.17 增加首次安装目录选择、集中保存程序/设置/插件/用户媒体/日志、安全复制迁移和保留数据的卸载流程。未公开发布；安装后更新沿用选定目录。

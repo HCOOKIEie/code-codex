@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.4.9",
+    [string]$Version = "0.4.17",
     [string]$WixPath
 )
 
@@ -19,6 +19,13 @@ $cargoVersion = $Matches[1]
 $uiManifest = Get-Content -LiteralPath (Join-Path $RepoRoot "packages\explorer-ui\package.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($Version -ne $cargoVersion -or $Version -ne [string]$uiManifest.version) {
     throw "Release version $Version does not match Cargo ($cargoVersion) and UI ($($uiManifest.version)) manifests."
+}
+
+# The EXE updater invokes the embedded script without a version argument.
+# Reject drift before building, rather than shipping a newly named old version.
+$installScriptSource = Get-Content -LiteralPath (Join-Path $RepoRoot "installer\Install-CodeCodex.ps1") -Raw -Encoding UTF8
+if ($installScriptSource -notmatch '\[string\]\$Version\s*=\s*"([^"]+)"' -or $Matches[1] -ne $Version) {
+    throw "Installer script default version must match release version $Version."
 }
 
 & (Join-Path $PSScriptRoot "build.ps1") -Configuration Release

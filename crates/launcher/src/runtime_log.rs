@@ -264,10 +264,10 @@ fn trim_runs(directory: &std::path::Path, current: &str) -> io::Result<()> {
 }
 
 pub fn begin(mode: &str) {
-    let directory = std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("CodeCodex/runtime-logs");
+    let location = workspace_service::application_paths::log_root("runtime");
+    let location_error = location.as_ref().err().map(ToString::to_string);
+    let directory =
+        location.unwrap_or_else(|_| std::env::temp_dir().join("CodeCodex-emergency-runtime"));
     let started_at = now();
     let log = RunLog {
         directory,
@@ -279,7 +279,7 @@ pub fn begin(mode: &str) {
         events: VecDeque::new(),
         bytes: 0,
         dirty: true,
-        storage_error: None,
+        storage_error: location_error,
         failure_total: 0,
         failure_counts: Default::default(),
         oversized_events: 0,
@@ -308,6 +308,12 @@ pub fn begin(mode: &str) {
     workspace_service::set_diagnostic_observer(record);
     context_resolver::set_diagnostic_observer(record);
     record("launcher", "session", "started", json!({"mode":mode}));
+    record(
+        "storage",
+        "location contract",
+        "observed",
+        json!({"centralized":workspace_service::application_paths::install_root().ok().flatten().is_some(),"layoutSchema":1,"runRetention":10,"maxRunBytes":MAX_BYTES,"settings":"data/settings.json","plugins":"plugins/<category>/<id>/<version>","runtimeLogs":"logs/runtime","diagnostics":"logs/diagnostics","legacyCopyRetained":true}),
+    );
     record(
         "diagnostics",
         "environment",

@@ -116,9 +116,10 @@ impl SettingsStore {
     pub fn for_current_user() -> Result<Self, WorkspaceError> {
         #[cfg(windows)]
         {
-            let local = std::env::var_os("LOCALAPPDATA").ok_or(WorkspaceError::Internal)?;
             Ok(Self::new(
-                PathBuf::from(local).join("CodeCodex").join("settings.json"),
+                crate::application_paths::data_root()
+                    .map_err(|_| WorkspaceError::Internal)?
+                    .join("settings.json"),
             ))
         }
         #[cfg(not(windows))]

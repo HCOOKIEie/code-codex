@@ -28,6 +28,7 @@ struct BootstrapMetadata<'a> {
     compatible: bool,
     manual_workspace: bool,
     startup_splash_active: bool,
+    centralized_storage: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +90,10 @@ pub fn build_bootstrap(
         compatible,
         manual_workspace,
         startup_splash_active,
+        centralized_storage: workspace_service::application_paths::install_root()
+            .ok()
+            .flatten()
+            .is_some(),
     };
     let metadata = serde_json::to_string(&metadata).map_err(|_| BootstrapError::InvalidBundle)?;
     Ok(format!(

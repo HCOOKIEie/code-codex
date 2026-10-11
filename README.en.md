@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.9-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="Version" src="https://img.shields.io/badge/version-0.4.17-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="Windows 10 x64 supported" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -31,7 +31,7 @@ editing, navigation, and file operations.
 
 ![Code-Codex code preview with syntax highlighting](docs/screenshots/code-preview.png)
 
-Local maintenance version **0.4.9** preserves the startup error dialog layout, presents the first failure promptly and appends automatic checks, outcomes and recovery assessment under a fifteen-second budget. Copy details and saved reports retain the original error and subsequent evidence. Updates show download, verification and installer-window handoff continuously; window readiness requires an explicit acknowledgement, and early exit is distinguished from an unconfirmed window. The UI request deadline now matches the native download budget. Not yet published; public downloads remain v0.4.4 and plugin assets remain pinned to v0.3.96. User preferences and caches are preserved.
+Local maintenance version **0.4.17** adds centralized storage and a first-install folder chooser. Updates reuse the selected location. Verified migration copies old settings, plugin resources and logs while retaining their originals. Normal uninstall keeps user data; explicit purge removes only known product paths. Code-Codex preferences and personal media gain native persistence without moving official accounts or chats. Installer UI logs now retain process output and communication details, acknowledge completion pages and monitor responsiveness. Failures trigger bounded read-only checks and a copyable full report, with independent dialog fallback. Completion-window failures are distinguished from installation failures and do not roll back a successful installation. Not yet published; public downloads remain v0.4.4 and plugin assets remain pinned to v0.3.96.
 
 ## Install Option 1: Download EXE
 
@@ -91,7 +91,7 @@ The generated EXE files are written to `target/release/`, including:
 Generate the downloadable setup EXE, MSI, and ZIP:
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.9
+./scripts/package.ps1 -Version 0.4.17
 ```
 
 The generated packages are written to `releases/`.
@@ -116,11 +116,11 @@ releases/plugins/
 
 Each folder uses the stable English plugin ID and contains its code, styles and required resources. GitHub Release assets still use unique flat filenames; `releases/release-assets.json` maps them to categorized local paths and SHA-256 values.
 
-Caches are stored at `%LOCALAPPDATA%\CodeCodex\plugin-cache\plugins\<category>\<plugin ID>\<package version>`. Normal upgrades and ordinary uninstall retain them. Unchanged packages remain available offline; valid old category-free directories or flat caches are verified before migration. Existing parameters, enable preferences, personal images and user videos remain. Installed confirms complete cached files; a package not yet verified and loaded in the current window shows Enable without clearing saved preferences. Previously built-in viewers, tools and the three additional appearance features require their new standalone packages on first use. Existing backgrounds need downloading again only if required package bytes or resources change, are missing or fail verification.
+Caches are stored at `<installation folder>\plugins\<category>\<plugin ID>\<package version>` after migration; older installations use `%LOCALAPPDATA%\CodeCodex\plugin-cache`. Normal upgrades and ordinary uninstall retain them. Unchanged packages remain available offline; valid old category-free directories or flat caches are verified before migration. Existing parameters, enable preferences, personal images and user videos remain. Installed confirms complete cached files; a package not yet verified and loaded in the current window shows Enable without clearing saved preferences. Previously built-in viewers, tools and the three additional appearance features require their new standalone packages on first use. Existing backgrounds need downloading again only if required package bytes or resources change, are missing or fail verification.
 
 Particle Image includes **six original default images** and Pixel Sculpt includes **three**, downloaded with their background packages. First use imports them without duplicating existing images or replacing personal media and playback choices. Deleted default images stay deleted on reopen. These assets remain outside the core installer.
 
-Codex Startup Transition also requires a downloaded player. The core embeds only a tiny early loader that reads verified startup and selected-background caches during the official loading screen, without network requests or waiting for file-tree mounting. Missing or invalid packages skip the animation, record the reason and let Codex start normally. Videos remain in the user's local IndexedDB; neither the installer nor plugin package includes a default official promotional video.
+Codex Startup Transition also requires a downloaded player. The core embeds only a tiny early loader that reads verified startup and selected-background caches during the official loading screen, without network requests or waiting for file-tree mounting. Missing or invalid packages skip the animation, record the reason and let Codex start normally. User videos are persisted in `<installation folder>\data\media\startup`, with IndexedDB retained as a playback cache; neither the installer nor plugin package includes a default official promotional video.
 
 For offline installation, retain the category structure and every required resource, then run that version's `code-codex.exe plugins --import-dir "releases directory"`. A `plugins` directory, category directory or individual plugin directory is also accepted. Only complete assets trusted by the embedded catalog are imported, without automatic activation. There is currently no separate plugin update or uninstall management page.
 
@@ -294,3 +294,11 @@ workflows are not included in this public source package.
 ## License
 
 [MIT](LICENSE). See the [third-party notices](THIRD_PARTY_NOTICES_EN.md) for effect provenance, Code-Codex modifications, and license boundaries.
+
+## Centralized storage (local v0.4.17)
+
+The EXE uses a compact 720 logical-pixel client-width, 3:1.8 overall aspect-ratio white branded wizard, with native monitor-DPI text and controls and aspect-preserving branding: Welcome → License Agreement → Installation Folder → Installing → Finish. Read and accept the MIT License before choosing a folder. Check Custom installation to reveal the folder field, then click Install; the same window shows progress and stays on the completion page until Finish is clicked. The default is `%LOCALAPPDATA%\Programs\Code-Codex`; a dedicated folder on another fixed local drive is supported. Updates reuse the installed location; in-app updates show Installing → Finish in the same branded window, skipping Welcome, License and Folder selection. To relocate, uninstall while retaining data, then install into a new folder; retained data is copied and the original is kept for recovery. For MSI use `msiexec /i CodeCodex-0.4.17-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"`.
+
+Program versions live in `versions/`, integration state in `integration/`, preferences and personal images/videos in `data/`, verified downloadable plugins in `plugins/<category>/<id>/<version>/`, diagnostic and runtime reports in `logs/`, update temporary files in `temp/`, and migration records in `backups/`. Only a small location pointer lives in the current-user registry. Official Codex accounts, chats and workspace files are outside this storage contract. Browser storage remains a rendering cache; Code-Codex preferences and personal media have native persistence.
+
+Runtime retention remains ten runs with a 5 MiB bound per run; installer reports retain ten files. Update events currently appear primarily in runtime logs. Initial extraction and emergency fallback may use the system temporary folder. Normal uninstall retains user data; explicit purge deletes only known product data paths and preserves unrelated files in the selected folder. Network paths, system folders, drive roots and linked ancestors are rejected. Local v0.4.17 is not yet published; public downloads remain v0.4.4 and unchanged plugin assets stay pinned to v0.3.96.

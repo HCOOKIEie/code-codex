@@ -86,6 +86,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// Prepare central storage and copy legacy user data without deleting its source.
+    InitializeStorage {
+        #[arg(long)]
+        install_root: PathBuf,
+    },
     /// Validate Stable Codex and shortcut ownership without changing anything.
     Preflight {
         #[arg(long, value_name = "DIRECTORY")]
@@ -317,7 +322,8 @@ fn main() -> ExitCode {
 fn execute() -> Result<OperationReport, IntegrationError> {
     let cli = Cli::parse();
     let (install_root, action) = match &cli.command {
-        Commands::Preflight { install_root, .. }
+        Commands::InitializeStorage { install_root }
+        | Commands::Preflight { install_root, .. }
         | Commands::PrepareInstall { install_root }
         | Commands::RollbackInstall { install_root }
         | Commands::CommitInstall { install_root }
@@ -325,6 +331,39 @@ fn execute() -> Result<OperationReport, IntegrationError> {
         | Commands::Restore { install_root }
         | Commands::Status { install_root } => (install_root, &cli.command),
     };
+    if matches!(action, Commands::InitializeStorage { .. }) {
+        #[cfg(windows)]
+        {
+            let source = include_str!("../../../../installer/Storage-Layout.ps1");
+            let script = format!(
+                "$ErrorActionPreference='Stop';{source}\n$root=Assert-CodeCodexRoot $env:CLE_STORAGE_ROOT -Owned;Test-CodeCodexAtomicStorage $root;Initialize-CodeCodexStorage $root"
+            );
+            let encoded = BASE64.encode(
+                script
+                    .encode_utf16()
+                    .flat_map(u16::to_le_bytes)
+                    .collect::<Vec<_>>(),
+            );
+            let powershell = std::env::var_os("SystemRoot")
+                .map(PathBuf::from)
+                .ok_or_else(|| {
+                    IntegrationError::InvalidArgument("System directory unavailable".into())
+                })?
+                .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+            let output = Command::new(powershell)
+                .args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &encoded])
+                .env("CLE_STORAGE_ROOT", install_root)
+                .creation_flags(0x08000000)
+                .output()
+                .map_err(|e| io_error(install_root, e))?;
+            if !output.status.success() {
+                return Err(IntegrationError::InvalidArgument(format!(
+                    "Central storage migration failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                )));
+            }
+        }
+    }
     let paths = if matches!(action, Commands::Preflight { .. }) {
         IntegrationPaths::resolve_with_options(
             install_root,
@@ -355,7 +394,7 @@ fn execute() -> Result<OperationReport, IntegrationError> {
             install_with_legacy_cleanup(&shell, &paths, version, icon.as_deref(), !preserve_legacy)
         }
         Commands::Restore { .. } => restore(&shell, &paths),
-        Commands::Status { .. } => status(&shell, &paths),
+        Commands::Status { .. } | Commands::InitializeStorage { .. } => status(&shell, &paths),
     }
 }
 

@@ -80,17 +80,10 @@ fn main() -> ExitCode {
 }
 
 fn installed_version() -> String {
-    env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .and_then(|local_app_data| {
-            fs::read_to_string(
-                local_app_data
-                    .join("Programs")
-                    .join("Code-Codex")
-                    .join("current-version"),
-            )
-            .ok()
-        })
+    workspace_service::application_paths::install_root()
+        .ok()
+        .flatten()
+        .and_then(|root| fs::read_to_string(root.join("current-version")).ok())
         .map(|value| value.trim().to_owned())
         .filter(|value| {
             value.len() <= 32

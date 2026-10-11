@@ -261,13 +261,10 @@ fn package(id: &str) -> Result<Package, BridgeError> {
         .ok_or_else(|| error("PLUGIN_ID", "This plugin is not in the trusted catalog."))
 }
 pub(crate) fn cache_root() -> Result<PathBuf, BridgeError> {
-    let local = std::env::var_os("LOCALAPPDATA").ok_or_else(|| {
-        error(
-            "PLUGIN_CACHE",
-            "The per-user application data directory is unavailable.",
-        )
-    })?;
-    let root = PathBuf::from(local).join("CodeCodex").join("plugin-cache");
+    let root = workspace_service::application_paths::plugin_root()
+        .map_err(|e| cache_io("Resolve plugin storage", &e))?;
+    workspace_service::application_paths::validate_directory_path(&root)
+        .map_err(|e| cache_io("Validate plugin storage", &e))?;
     std::fs::create_dir_all(&root).map_err(|e| cache_io("Cannot prepare plugin cache", &e))?;
     for path in [root.clone(), root.parent().unwrap().to_path_buf()] {
         let meta = std::fs::symlink_metadata(path).map_err(|e| cache_io("Cache metadata", &e))?;
@@ -635,9 +632,8 @@ fn source_available(root: &Path, p: &Package) -> bool {
 }
 /// Explicit support audit, never prepares directories or migrates user files.
 pub(crate) fn diagnostic_status() -> Result<Value, BridgeError> {
-    let local = std::env::var_os("LOCALAPPDATA")
-        .ok_or_else(|| error("PLUGIN_CACHE", "Local data directory unavailable"))?;
-    let root = PathBuf::from(local).join("CodeCodex/plugin-cache");
+    let root = workspace_service::application_paths::plugin_root()
+        .map_err(|e| cache_io("Resolve plugin audit storage", &e))?;
     match std::fs::symlink_metadata(&root) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Ok(json!({"cache":"absent","normalForFreshInstall":true,"created":false}));

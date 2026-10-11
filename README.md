@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.4.9-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.4.17-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -28,7 +28,7 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 
 ![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
 
-当前本地维护版 **0.4.9**：启动失败后保留现有报错窗口布局，尽快显示首次错误，自动追加有十五秒预算的自检过程、结果和恢复评估；Copy details 与本地报告保留原始错误及后续记录。更新界面连续显示下载、校验和安装窗口交接阶段，只有收到窗口显示确认才提示已打开，并区分提前退出与未确认；更新请求时限与后台下载对齐。尚未 GitHub 发布，公开下载仍为 v0.4.4；插件资源继续复用 v0.3.96，不更改用户参数或缓存。
+当前本地维护版 **0.4.17**：新增集中目录方案。EXE 首次安装可选择默认用户目录或自定义本地文件夹；程序版本、插件、设置、用户素材、日志和临时文件按固定子目录保存，更新沿用原目录。旧设置/下载资源/日志通过校验后复制迁移，旧来源保留；普通卸载保留用户数据，明确清除时只移除本产品的已知目录。插件参数与个人图片/视频同步保存到本机文件，官方账号和聊天数据不纳入迁移。安装向导新增完整过程日志、完成页确认及心跳检查；失败时自动运行限时只读自检，在同一窗口展示和复制完整报告，窗口不可用时使用独立错误提示。安装成功后的完成页通信失败单独标记，不回滚已安装版本。尚未 GitHub 发布，公开下载仍为 v0.4.4；插件资源继续复用 v0.3.96。
 
 ## 安装方式一：直接下载 EXE
 
@@ -55,6 +55,19 @@ Get-FileHash .\CodeCodex-0.4.4-x64-setup.exe -Algorithm SHA256
 快捷方式，或指向 `Codex.exe` / `ChatGPT.exe` 的重命名快捷方式。原快捷方式会备份，
 卸载时恢复；只有找不到这些快捷方式时，才会创建独立的 `Code-Codex` 桌面快捷方式。
 安装完成后，安装器会显示实际使用的快捷方式路径。
+
+
+### 集中目录与自定义安装
+
+EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整体窗口宽高比为3∶1.8，按实际屏幕 DPI 绘制文字和按钮，品牌图保持比例：Welcome → License Agreement → Installation Folder → Installing → Finish。阅读并同意 MIT 协议后，进入目录页；勾选 Custom installation 展开地址栏，点击 Install 后在同一窗口连续安装，成功后点击 Finish 关闭。默认 `%LOCALAPPDATA%\Programs\Code-Codex`，也可选择其他固定本地盘中的专用文件夹。已安装时更新沿用该目录；应用内自动更新在同一品牌窗口直接显示 Installing → Finish，跳过欢迎、协议和目录页。需要搬迁时先普通卸载保留数据，再安装到新目录，安装器会复制保留的数据并保留原来源。MSI 可使用 `msiexec /i CodeCodex-0.4.17-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"` 指定目录。
+
+- `versions/`：不可变程序版本；`integration/`：快捷方式与安装事务。
+- `data/`：文件树设置、插件参数与用户图片/视频；官方 Codex 账号、聊天、项目文件仍由官方客户端管理。
+- `plugins/<类别>/<插件ID>/<版本>/`：校验后的下载代码及默认素材。
+- `logs/runtime/`：最近十次运行，每次最多5MiB；`logs/diagnostics/`：失败与自检报告；`logs/install/`：最近十次安装过程；`logs/update/`：更新日志目录（当前更新事件主要记录在运行日志）。
+- `temp/`：安装后更新和处理临时文件；`backups/`：迁移记录。首次解包及目录不可用时，系统临时目录可作为应急落点，并在诊断中说明。
+
+选择专用文件夹，避免系统目录、盘根目录、网络目录和链接目录。普通卸载默认保留设置、插件、素材与日志；明确选择清除时删除本产品已知数据目录，目录中不属于 Code-Codex 的其他文件保留。插件资源、程序安装及日志可能独立增长，运行日志限额不代表整个文件夹的容量上限。
 
 ## 安装方式二：从源码生成 EXE
 
@@ -86,7 +99,7 @@ Get-FileHash .\CodeCodex-0.4.4-x64-setup.exe -Algorithm SHA256
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.4.9
+./scripts/package.ps1 -Version 0.4.17
 ```
 
 生成结果会写入 `releases/`。
@@ -111,11 +124,11 @@ releases/plugins/
 
 每个插件的文件夹名称使用稳定英文 ID，代码、样式和必需资源留在该插件目录内。GitHub Release 资产仍使用唯一文件名；`releases/release-assets.json` 映射文件名、本地分类路径和 SHA-256。
 
-缓存位于 `%LOCALAPPDATA%\CodeCodex\plugin-cache\plugins\<类别>\<插件ID>\<插件版本>`。正常升级和普通卸载保留缓存，未变插件可离线复用；旧的有效分类前目录或平铺缓存先校验再迁移。原有参数、启用偏好、个人图库和用户视频保留。Installed 仅表示缓存完整；当前窗口尚未校验载入时，按钮显示 Enable，保存偏好不会因此被清空。此前内置的预览、工具及三种外观功能首次使用新独立包时需要下载；已有背景只在所需包或素材变化、缺失或损坏时重新下载。
+缓存位于 `<安装目录>\plugins\<类别>\<插件ID>\<插件版本>`（未迁移的旧版仍使用 `%LOCALAPPDATA%\CodeCodex\plugin-cache`）。正常升级和普通卸载保留缓存，未变插件可离线复用；旧的有效分类前目录或平铺缓存先校验再迁移。原有参数、启用偏好、个人图库和用户视频保留。Installed 仅表示缓存完整；当前窗口尚未校验载入时，按钮显示 Enable，保存偏好不会因此被清空。此前内置的预览、工具及三种外观功能首次使用新独立包时需要下载；已有背景只在所需包或素材变化、缺失或损坏时重新下载。
 
 Particle Image 默认提供 **6 张原图**，Pixel Sculpt 默认提供 **3 张原图**，随对应背景插件下载。首次使用自动导入，已有相同图片不重复添加，个人图片和播放选择保留；用户删除默认图片后，重新打开不会自动恢复。这些图片没有加入核心安装包。
 
-Codex Startup Transition 的播放器也需下载。核心只保留很小的早期加载入口，在官方等待画面读取已校验的启动插件和所选背景缓存，不联网、不等待文件树挂载。缺包或损坏时跳过动画并记录原因，Codex 正常继续启动。视频仍来自用户本地 IndexedDB，安装包和插件包不自带官方宣传视频。
+Codex Startup Transition 的播放器也需下载。核心只保留很小的早期加载入口，在官方等待画面读取已校验的启动插件和所选背景缓存，不联网、不等待文件树挂载。缺包或损坏时跳过动画并记录原因，Codex 正常继续启动。用户视频保存在 `<安装目录>\data\media\startup`，浏览器 IndexedDB 作为播放缓存；安装包和插件包不自带官方宣传视频。
 
 离线安装保留上述目录及插件的全部资源，再运行该版本 `code-codex.exe plugins --import-dir "releases目录"`；也可指定 `plugins`、分类目录或单个插件目录。命令仅导入内置目录信任的完整资产，不自动启用插件。当前没有独立插件更新或卸载管理页。
 

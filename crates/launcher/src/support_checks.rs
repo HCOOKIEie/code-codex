@@ -225,7 +225,7 @@ fn local_checks() -> Value {
         }
         Err(e) => json!({"status":"failed","code":e.code,"reason":e.message}),
     };
-    json!({"components":components,"settings":settings,"plugins":packages,"diskWriteProbe":"not attempted","officialInternals":"not inspected"})
+    json!({"components":components,"settings":settings,"plugins":packages,"storageLayout":workspace_service::application_paths::diagnostic_status(),"nativePersistence":crate::renderer_storage::diagnostic_status(),"diskWriteProbe":"not attempted","officialInternals":"not inspected"})
 }
 
 #[cfg(test)]

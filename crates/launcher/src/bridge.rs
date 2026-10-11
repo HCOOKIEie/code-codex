@@ -491,7 +491,7 @@ impl UpdateChecker {
 
         let directory = tempfile::Builder::new()
             .prefix("CodeCodex-Update-")
-            .tempdir()
+            .tempdir_in(workspace_service::application_paths::temp_root().map_err(|_| update_download_error())?)
             .map_err(|_| update_download_error())?;
         let installer_path = directory.path().join(&asset.name);
         let mut file =
@@ -3729,6 +3729,13 @@ impl BridgeHandler for NativeBridge {
         let result = async {
             self.ensure_epoch(epoch)?;
             match request.method.as_str() {
+                "explorer.storage.request" => {
+                  let context=crate::renderer_storage::request_context(&request.params);
+                  crate::renderer_storage::request(request.params).map_err(|e| {
+                    crate::runtime_log::record("storage","native persistence","failed",json!({"code":"STORAGE_FAILED","requestContext":context,"ioKind":format!("{:?}",e.kind()),"osErrorCode":e.raw_os_error(),"errorChain":crate::network_diagnostics::error_details(&e)["errorChain"]}));
+                    BridgeError::new("STORAGE_FAILED",format!("Code-Codex storage failed: {e}"))
+                  })
+                },
                 "explorer.runtime.check" => Ok(crate::support_checks::run().await),
                 "explorer.runtime.list" => {
                     crate::runtime_log::list().map_err(|e| BridgeError::new("RUNTIME_LOG", e))

@@ -12,6 +12,7 @@
 //! renderer-controlled paths are relative, validated component-by-component,
 //! and opened through retained no-follow capabilities rooted at the workspace.
 
+pub mod application_paths;
 mod error;
 mod listing;
 mod mutation;

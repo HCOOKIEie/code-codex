@@ -25,5 +25,8 @@ tokio-util.workspace = true
 tracing.workspace = true
 zip.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+
 [lints]
 workspace = true

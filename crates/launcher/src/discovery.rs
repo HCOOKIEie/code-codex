@@ -745,8 +745,9 @@ const MAX_STALE_STAGE_SCAN: usize = 32;
 
 #[cfg(windows)]
 fn open_stage_root() -> Result<(PathBuf, File, Vec<File>), DiscoveryError> {
+    let staging_parent = std::env::temp_dir();
     let temp =
-        dunce::canonicalize(env::temp_dir()).map_err(|_| DiscoveryError::AppServerNotFound)?;
+        dunce::canonicalize(staging_parent).map_err(|_| DiscoveryError::AppServerNotFound)?;
     let requested = temp.join(STAGE_ROOT_NAME);
     std::fs::create_dir_all(&requested).map_err(|_| DiscoveryError::AppServerNotFound)?;
     let root = dunce::canonicalize(&requested).map_err(|_| DiscoveryError::AppServerNotFound)?;

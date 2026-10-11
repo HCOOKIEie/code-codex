@@ -10,6 +10,7 @@ mod network_diagnostics;
 mod plugin_store;
 mod process_diagnostics;
 mod process_guard;
+mod renderer_storage;
 mod runtime_log;
 mod startup_diagnostics;
 mod support_checks;

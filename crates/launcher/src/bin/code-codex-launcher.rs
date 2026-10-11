@@ -34,7 +34,6 @@ const ERROR_TITLE: &str = "Code-Codex startup problem";
 const MAX_CAPTURE_BYTES: usize = 256 * 1024;
 const MAX_DIALOG_DETAILS_CHARS: usize = 12 * 1024;
 const MAX_DIAGNOSTIC_REPORTS: usize = 10;
-const DIAGNOSTIC_DIRECTORY: &str = "CodeCodex\\diagnostics";
 
 const DIALOG_SCRIPT: &str = r#"
 $ErrorActionPreference = 'Stop'
@@ -245,7 +244,10 @@ fn main() -> ExitCode {
     // A failure marker arrives before expensive post-failure checks finish.
     let live_directory = tempfile::Builder::new()
         .prefix("CodeCodex-Error-")
-        .tempdir()
+        .tempdir_in(
+            workspace_service::application_paths::temp_root()
+                .unwrap_or_else(|_| std::env::temp_dir()),
+        )
         .ok();
     let live_state = live_directory.as_ref().map(|d| d.path().join("state.json"));
     let mut last = None;
@@ -539,10 +541,8 @@ fn format_report(
 }
 
 fn persist_report(report: &str) -> io::Result<PathBuf> {
-    let local_app_data = env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "LOCALAPPDATA is unavailable"))?;
-    let directory = local_app_data.join(DIAGNOSTIC_DIRECTORY);
+    let directory = workspace_service::application_paths::log_root("diagnostics")?;
+    workspace_service::application_paths::validate_directory_path(&directory)?;
     fs::create_dir_all(&directory)?;
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -623,7 +623,10 @@ fn normalize_failure_code(code: Option<i32>) -> u8 {
 fn show_startup_error(diagnostic: &StartupDiagnostic, details: &str, report_path: Option<&Path>) {
     let state_directory = tempfile::Builder::new()
         .prefix("CodeCodex-Error-")
-        .tempdir()
+        .tempdir_in(
+            workspace_service::application_paths::temp_root()
+                .unwrap_or_else(|_| std::env::temp_dir()),
+        )
         .ok();
     let state_path = state_directory
         .as_ref()

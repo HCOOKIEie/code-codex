@@ -3,14 +3,15 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use base64::Engine as _;
+use gui_support::setup_observability::{SetupJournal, bounded_checks};
 use serde::Deserialize;
+use serde_json::json;
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Output, Stdio};
-use std::thread;
 use std::time::Duration;
 
 #[path = "../gui_support.rs"]
@@ -69,13 +70,35 @@ struct PortableExecutableLayout {
 }
 
 fn main() -> ExitCode {
-    let arguments: Vec<_> = env::args_os().skip(1).collect();
-    let mut progress = gui_support::ProgressDialog::open(
-        TITLE,
-        "Preparing setup...",
-        5,
-        env!("CARGO_PKG_VERSION"),
+    let mut arguments: Vec<_> = env::args_os().skip(1).collect();
+    let automatic_update = env::var_os("CLE_UPDATE_WINDOW_READY").is_some();
+    let interactive = wants_setup_selection(&arguments, automatic_update);
+    let branded_wizard = interactive || automatic_update;
+    let mut progress = if interactive {
+        gui_support::ProgressDialog::open_setup(
+            TITLE,
+            env!("CARGO_PKG_VERSION"),
+            explicit_install_root(&arguments),
+            include_bytes!("../../resources/setup-brand-background.png"),
+            include_str!("../../../../LICENSE"),
+        )
+    } else if automatic_update {
+        gui_support::ProgressDialog::open_update(
+            TITLE,
+            env!("CARGO_PKG_VERSION"),
+            include_bytes!("../../resources/setup-brand-background.png"),
+            include_str!("../../../../LICENSE"),
+        )
+    } else {
+        gui_support::ProgressDialog::open(TITLE, "Preparing setup...", 5, env!("CARGO_PKG_VERSION"))
+    };
+    let journal = progress.journal();
+    journal.event(
+        "setup mode",
+        "selected",
+        json!({"version":env!("CARGO_PKG_VERSION"),"manual":interactive,"automaticUpdate":automatic_update,"brandedWizard":branded_wizard,"pid":std::process::id()}),
     );
+    save_session(&journal, "running");
     // The updater owns this private rendezvous directory. Never infer readiness
     // from process creation: the progress form must have emitted its Shown event.
     if progress.window_ready()
@@ -83,18 +106,61 @@ fn main() -> ExitCode {
     {
         let path = PathBuf::from(path);
         if path.is_absolute() && path.file_name().is_some_and(|n| n == "window-ready") {
-            let _ = fs::write(path, "ready");
+            match fs::write(path, "ready") {
+                Ok(()) => journal.event("updater window handoff", "confirmed", json!({})),
+                Err(e) => journal.event(
+                    "updater window handoff",
+                    "write failed",
+                    json!({"reason":e.to_string(),"osCode":e.raw_os_error()}),
+                ),
+            }
         }
     }
+    if branded_wizard && !progress.window_ready() {
+        deliver_failure(
+            &mut progress,
+            "The setup window could not be initialized; installation has not started.",
+            false,
+        );
+        return ExitCode::FAILURE;
+    }
+    if interactive {
+        match progress.wait_for_setup_selection() {
+            Ok(Some(root)) => arguments = selected_install_arguments(&arguments, root),
+            Ok(None) => {
+                journal.event("setup", "cancelled", json!({"beforePayload":true}));
+                progress.close();
+                save_session(&journal, "cancelled");
+                return ExitCode::SUCCESS;
+            }
+            Err(error) => {
+                deliver_failure(&mut progress, &error, false);
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    journal.event("installation transaction", "started", json!({}));
+    save_session(&journal, "installing");
     match run_setup(&arguments, &mut progress) {
         Ok(output) if output.status.success() => {
+            if String::from_utf8_lossy(&output.stdout).contains("CODECODEX_INSTALL_CANCELLED") {
+                journal.event("setup", "cancelled", json!({"installerCancelled":true}));
+                progress.close();
+                save_session(&journal, "cancelled");
+                return ExitCode::SUCCESS;
+            }
+            journal.event(
+                "installation transaction",
+                "completed",
+                json!({"exitCode":output.status.code()}),
+            );
+            journal.event("installer output","captured",json!({"stdout":sanitize_script_output(&output.stdout),"stderr":sanitize_script_output(&output.stderr)}));
+            save_session(&journal, "installed");
             progress.set_progress_detail(
                 100,
                 "Installation complete",
                 "Code-Codex is ready to use.",
             );
-            thread::sleep(Duration::from_millis(650));
-            progress.close();
             let stdout = String::from_utf8_lossy(&output.stdout);
             let shortcut = stdout
                 .lines()
@@ -107,97 +173,331 @@ fn main() -> ExitCode {
                 ),
                 None => "Code-Codex was installed successfully. Open the Code-Codex desktop shortcut to start Codex with Code-Codex.".to_owned(),
             };
-            gui_support::show_dialog(TITLE, &message, false);
+            if branded_wizard {
+                if let Err(error) = progress.finish_setup(&message) {
+                    deliver_failure(
+                        &mut progress,
+                        &format!(
+                            "Installation succeeded, but the completion window failed: {error}. The installed version remains valid; no rollback is requested."
+                        ),
+                        true,
+                    );
+                } else {
+                    progress.close();
+                    save_session(&journal, "completed");
+                }
+            } else {
+                progress.close();
+                save_session(&journal, "completed");
+                gui_support::show_dialog(TITLE, &message, false);
+            }
             ExitCode::SUCCESS
         }
         Ok(output) => {
-            progress.close();
             let detail = format_setup_failure(output.status.code(), &output.stdout, &output.stderr);
-            gui_support::show_dialog(TITLE, &setup_failure_message(&detail), true);
+            deliver_failure(&mut progress, &detail, false);
             ExitCode::FAILURE
         }
         Err(error) => {
-            progress.close();
-            gui_support::show_dialog(TITLE, &setup_failure_message(&error), true);
+            deliver_failure(&mut progress, &error, false);
             ExitCode::FAILURE
         }
     }
 }
 
-fn setup_failure_message(detail: &str) -> String {
-    let report = format!(
-        "Code-Codex installation diagnostic\nVersion: {}\n\n{detail}",
-        env!("CARGO_PKG_VERSION")
-    );
-    let saved = (|| -> std::io::Result<PathBuf> {
-        let root = env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .ok_or_else(|| std::io::Error::other("LOCALAPPDATA unavailable"))?
-            .join("CodeCodex/diagnostics");
-        for directory in [root.parent().expect("fixed parent"), root.as_path()] {
-            if let Ok(metadata) = fs::symlink_metadata(directory) {
+fn wants_setup_selection(arguments: &[OsString], automatic_update: bool) -> bool {
+    arguments
+        .iter()
+        .any(|arg| arg.eq_ignore_ascii_case("-SelectDirectory"))
+        || (arguments.is_empty() && !automatic_update)
+}
+
+fn explicit_install_root(arguments: &[OsString]) -> Option<&std::ffi::OsStr> {
+    arguments
+        .windows(2)
+        .find(|pair| pair[0].eq_ignore_ascii_case("-InstallRoot"))
+        .map(|pair| pair[1].as_os_str())
+}
+
+fn selected_install_arguments(arguments: &[OsString], root: OsString) -> Vec<OsString> {
+    let mut result = Vec::new();
+    let mut arguments = arguments.iter();
+    while let Some(arg) = arguments.next() {
+        if arg.eq_ignore_ascii_case("-SelectDirectory") {
+            continue;
+        }
+        if arg.eq_ignore_ascii_case("-InstallRoot") {
+            arguments.next();
+            continue;
+        }
+        result.push(arg.clone());
+    }
+    result.extend([OsString::from("-InstallRoot"), root]);
+    result
+}
+
+fn save_report_file(name: &str, report: &str) -> std::io::Result<PathBuf> {
+    fn validate_file(path: &Path) -> std::io::Result<()> {
+        match fs::symlink_metadata(path) {
+            Ok(m) => {
                 #[cfg(windows)]
                 {
                     use std::os::windows::fs::MetadataExt;
-                    if metadata.file_attributes() & 0x400 != 0 {
-                        return Err(std::io::Error::other(
-                            "Redirected diagnostic directory refused",
-                        ));
+                    if m.file_attributes() & 0x400 != 0 {
+                        return Err(std::io::Error::other("Redirected diagnostic file refused"));
                     }
                 }
-                if !metadata.is_dir() || metadata.file_type().is_symlink() {
-                    return Err(std::io::Error::other("Invalid diagnostic directory"));
+                if !m.is_file() || m.file_type().is_symlink() {
+                    return Err(std::io::Error::other(
+                        "Diagnostic target is not a regular file",
+                    ));
+                }
+                Ok(())
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+    fn write(root: &Path, name: &str, report: &str) -> std::io::Result<PathBuf> {
+        workspace_service::application_paths::validate_directory_path(root)?;
+        fs::create_dir_all(root)?;
+        let path = root.join(name);
+        validate_file(&path)?;
+        let staged = root.join(format!("{name}.pending"));
+        validate_file(&staged)?;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&staged)?;
+        file.write_all(report.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&staged, &path)?;
+        let family = if name.ends_with(".json") {
+            ("setup-run-", ".json")
+        } else {
+            ("setup-", ".txt")
+        };
+        let mut old: Vec<_> = fs::read_dir(root)?
+            .filter_map(Result::ok)
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                name.starts_with(family.0)
+                    && name.ends_with(family.1)
+                    && name[family.0.len()..name.len() - family.1.len()]
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || b == b'-')
+                    && e.file_type().is_ok_and(|t| t.is_file() && !t.is_symlink())
+            })
+            .map(|e| e.path())
+            .collect();
+        old.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+        for p in old.into_iter().skip(10) {
+            let _ = fs::remove_file(p);
+        }
+        Ok(path)
+    }
+    if report.len() > 5 * 1024 * 1024 {
+        return Err(std::io::Error::other(
+            "Setup report exceeds the bounded 5 MiB limit",
+        ));
+    }
+    let central = workspace_service::application_paths::log_root("diagnostics")
+        .and_then(|p| write(&p, name, report));
+    match central {
+        Ok(p) => Ok(p),
+        Err(e) => {
+            let fallback = env::temp_dir().join("CodeCodex-Diagnostics");
+            let report = if name.ends_with(".json") {
+                let mut v: serde_json::Value =
+                    serde_json::from_str(report).map_err(std::io::Error::other)?;
+                v["diagnosticStorageFallback"] =
+                    json!({"centralError":e.to_string(),"systemTemp":true});
+                serde_json::to_string_pretty(&v).map_err(std::io::Error::other)?
+            } else {
+                format!(
+                    "{report}\nDiagnostic storage fallback: central directory unavailable: {e}; using system temporary folder.\n"
+                )
+            };
+            write(&fallback, name, &report)
+        }
+    }
+}
+
+fn save_session(journal: &SetupJournal, outcome: &str) {
+    let mut snapshot = journal.snapshot();
+    snapshot["version"] = json!(env!("CARGO_PKG_VERSION"));
+    snapshot["outcome"] = json!(outcome);
+    if let Ok(Some(root)) = workspace_service::application_paths::install_root() {
+        let since = snapshot["runId"]
+            .as_str()
+            .and_then(|v| v.split('-').next())
+            .and_then(|v| v.parse::<u128>().ok())
+            .unwrap_or(u128::MAX);
+        let folder = root.join("logs/install");
+        if workspace_service::application_paths::validate_directory_path(&folder).is_ok()
+            && let Ok(entries) = fs::read_dir(folder)
+        {
+            let mut paths: Vec<_> = entries
+                .filter_map(Result::ok)
+                .filter(|e| e.file_name().to_string_lossy().starts_with("install-"))
+                .map(|e| e.path())
+                .collect();
+            paths.sort();
+            for path in paths.into_iter().rev().take(10) {
+                let Ok(meta) = fs::symlink_metadata(&path) else {
+                    continue;
+                };
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::MetadataExt;
+                    if meta.file_attributes() & 0x400 != 0 {
+                        continue;
+                    }
+                }
+                if !meta.is_file()
+                    || meta.len() > 128 * 1024
+                    || meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .is_none_or(|t| t.as_millis() < since)
+                {
+                    continue;
+                }
+                if let Ok(bytes) = fs::read(&path)
+                    && let Ok(report) = serde_json::from_slice::<serde_json::Value>(&bytes)
+                    && report["version"] == env!("CARGO_PKG_VERSION")
+                {
+                    snapshot["installerTransactionReport"] = report;
+                    break;
                 }
             }
         }
-        fs::create_dir_all(&root)?;
-        let time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        let path = root.join(format!("setup-{time}-{}.txt", std::process::id()));
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&path)?;
-        file.write_all(report.as_bytes())?;
-        file.sync_all()?;
-        // Scoped retention for this report family only, never recursive or following links.
-        if let Ok(entries) = fs::read_dir(&root) {
-            let mut old: Vec<_> = entries
-                .filter_map(Result::ok)
-                .filter(|e| {
-                    let name = e.file_name();
-                    let name = name.to_string_lossy();
-                    name.starts_with("setup-")
-                        && name.ends_with(".txt")
-                        && name[6..name.len() - 4]
-                            .bytes()
-                            .all(|b| b.is_ascii_digit() || b == b'-')
-                        && e.file_type().is_ok_and(|t| t.is_file() && !t.is_symlink())
-                })
-                .map(|e| e.path())
-                .collect();
-            old.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
-            for old in old.into_iter().skip(10) {
-                let _ = fs::remove_file(old);
-            }
-        }
-        Ok(path)
-    })();
-    let mut visible = detail.chars().take(12_000).collect::<String>();
-    if detail.chars().count() > 12_000 {
-        visible.push_str("\n[Dialog shortened; full report retained separately]");
     }
-    match saved {
+    let name = format!(
+        "setup-run-{}.json",
+        snapshot["runId"].as_str().unwrap_or("unknown")
+    );
+    let text = serde_json::to_string_pretty(&snapshot).unwrap_or_default();
+    if let Err(e) = save_report_file(&name, &text) {
+        journal.event(
+            "session log",
+            "save failed",
+            json!({"reason":e.to_string(),"osCode":e.raw_os_error()}),
+        );
+        eprintln!("Setup session could not be saved: {e}");
+    }
+}
+
+fn deliver_failure(progress: &mut gui_support::ProgressDialog, detail: &str, installed: bool) {
+    let journal = progress.journal();
+    journal.event(
+        "setup failure",
+        "observed",
+        json!({"installationSucceeded":installed,"originalError":detail}),
+    );
+    save_session(
+        &journal,
+        if installed {
+            "completion UI failed"
+        } else {
+            "failed; checking"
+        },
+    );
+    progress.checking();
+    match gui_support::trusted_system32_powershell() {
+        Ok(shell) => {
+            let mut command = Command::new(shell);
+            let script = format!(
+                "{}\n{}",
+                include_str!("../setup-checks.ps1"),
+                include_str!("../support-checks.ps1")
+            );
+            command.args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &script,
+            ]);
+            // Locator comes from the verified product contract, never arbitrary arguments.
+            match workspace_service::application_paths::install_root() {
+                Ok(Some(root)) => {
+                    command.env("CLE_CHECK_INSTALL_ROOT", root);
+                }
+                other => {
+                    journal.event("self-check locator","default-location observation",json!({"reason":format!("{other:?}"),"interpretation":"Default folder is auxiliary evidence, not the rejected custom installation target"}));
+                    command.env(
+                        "CLE_CHECK_INSTALL_ROOT",
+                        env::var_os("LOCALAPPDATA")
+                            .map(PathBuf::from)
+                            .unwrap_or_else(env::temp_dir)
+                            .join("Programs/Code-Codex"),
+                    );
+                }
+            }
+            let _ = bounded_checks(command, &journal, Duration::from_secs(10));
+        }
+        Err(e) => journal.event(
+            "automatic installation checks",
+            "unavailable",
+            json!({"reason":e}),
+        ),
+    }
+    let report = format!(
+        "Code-Codex installation diagnostic\nVersion: {}\nInstallation succeeded: {installed}\n\nOriginal error:\n{detail}\n\nInstaller and UI process observations (automatic checks are auxiliary evidence, not proof of causation):\n{}\n\nUnobserved: security-product private policy, kernel-blocked filesystem I/O, original network phase timings, full crash dumps.\n",
+        env!("CARGO_PKG_VERSION"),
+        journal.text()
+    );
+    let id = journal.snapshot()["runId"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_owned();
+    let saved = save_report_file(&format!("setup-{id}.txt"), &report);
+    let path = saved.as_ref().ok().map(|p| p.as_path());
+    let visible = match &saved {
         Ok(path) => format!(
-            "Code-Codex setup failed:\n\n{visible}\n\nFull diagnostic report: {}",
+            "{}\n\nFull diagnostic report: {}",
+            report.chars().take(1000).collect::<String>(),
             path.display()
         ),
         Err(e) => format!(
-            "Code-Codex setup failed:\n\n{visible}\n\nDiagnostic report could not be saved: {e}"
+            "{}\nDiagnostic report could not be saved: {e}",
+            report.chars().take(1000).collect::<String>()
         ),
+    };
+    if let Err(e) = progress.show_report(&report, path) {
+        journal.event("diagnostic window", "fallback", json!({"reason":e}));
+        progress.close();
+        save_session(
+            &journal,
+            if installed {
+                "installed; diagnostic fallback"
+            } else {
+                "failed; diagnostic fallback"
+            },
+        );
+        gui_support::show_dialog(TITLE, &visible, true);
+    } else {
+        progress.close();
     }
+    // Include copy/open/close and final cleanup in the saved report, while retaining
+    // the same original error and completed check observations.
+    let final_report = format!(
+        "{report}\nFinal report delivery and cleanup observations:\n{}",
+        journal.text()
+    );
+    let _ = save_report_file(&format!("setup-{id}.txt"), &final_report);
+    save_session(
+        &journal,
+        if installed {
+            "installed; completion UI failed"
+        } else {
+            "failed"
+        },
+    );
 }
 
 fn run_setup(
@@ -211,7 +511,13 @@ fn run_setup(
     );
     let executable = env::current_exe()
         .map_err(|error| format!("the setup executable could not be located: {error}"))?;
-    match inspect_setup_source(&executable)? {
+    let source = inspect_setup_source(&executable)?;
+    progress.journal().event(
+        "setup package",
+        "validated",
+        json!({"source":format!("{source:?}")}),
+    );
+    match source {
         SetupSource::Embedded {
             payload_offset,
             payload_length,
@@ -252,7 +558,10 @@ fn run_embedded_setup(
 ) -> Result<Output, String> {
     let temporary_directory = tempfile::Builder::new()
         .prefix("CodeCodex-Setup-")
-        .tempdir()
+        .tempdir_in(
+            workspace_service::application_paths::temp_root()
+                .unwrap_or_else(|_| std::env::temp_dir()),
+        )
         .map_err(|error| format!("a temporary setup directory could not be created: {error}"))?;
     let archive = temporary_directory.path().join("payload.zip");
     progress.set_progress_detail(
@@ -740,6 +1049,41 @@ fn verify_extracted_installer(extraction_root: &Path, installer: &Path) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manual_setup_waits_for_selection_but_automatic_update_does_not() {
+        assert!(wants_setup_selection(&[], false));
+        assert!(!wants_setup_selection(&[], true));
+        assert!(!wants_setup_selection(&["-NoActivate".into()], false));
+        assert!(wants_setup_selection(&["-selectdirectory".into()], false));
+    }
+
+    #[test]
+    fn selected_root_is_forwarded_once_without_second_directory_prompt() {
+        let before = vec![
+            "-SelectDirectory".into(),
+            "-InstallRoot".into(),
+            "C:\\Old".into(),
+            "-NoActivate".into(),
+            "-Version".into(),
+            "0.4.13".into(),
+        ];
+        let root = OsString::from("E:\\自定义 Apps\\Code-Codex");
+        assert_eq!(
+            explicit_install_root(&before),
+            Some(std::ffi::OsStr::new("C:\\Old"))
+        );
+        assert_eq!(
+            selected_install_arguments(&before, root.clone()),
+            vec![
+                OsString::from("-NoActivate"),
+                "-Version".into(),
+                "0.4.13".into(),
+                "-InstallRoot".into(),
+                root
+            ]
+        );
+    }
 
     const PE_OFFSET: usize = 0x80;
     const OPTIONAL_LENGTH: usize = 0xf0;

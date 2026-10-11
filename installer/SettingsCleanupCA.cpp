@@ -186,6 +186,30 @@ bool IsMissingError(DWORD error) noexcept {
     return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
 }
 
+bool ValidateSelectedInstallRoot(const std::wstring& path) noexcept {
+    if(path.size()<4 || path.size()>180 || path[1]!=L':' || path[2]!=L'\\' || path.find(L"..")!=std::wstring::npos || path.find(L'"')!=std::wstring::npos)return false;
+    const std::wstring drive=path.substr(0,3);
+    if(GetDriveTypeW(drive.c_str())!=DRIVE_FIXED)return false;
+    for(const KNOWNFOLDERID* folder : {&FOLDERID_Profile,&FOLDERID_LocalAppData,&FOLDERID_RoamingAppData,&FOLDERID_Desktop,&FOLDERID_Documents,&FOLDERID_Windows,&FOLDERID_ProgramFiles,&FOLDERID_ProgramFilesX86}) {
+        PWSTR known=nullptr;
+        if(SUCCEEDED(SHGetKnownFolderPath(*folder,KF_FLAG_DEFAULT,nullptr,&known)) && known) {
+            const size_t n=wcslen(known);
+            const bool match=path.size()>=n && _wcsnicmp(path.c_str(),known,n)==0;
+            const bool system=folder==&FOLDERID_Windows || folder==&FOLDERID_ProgramFiles || folder==&FOLDERID_ProgramFilesX86;
+            const bool reject=match && (path.size()==n || (system && path.size()>n && path[n]==L'\\'));
+            CoTaskMemFree(known);if(reject)return false;
+        }
+    }
+    auto ancestor=path;
+    while(ancestor.size()>3) {
+        DWORD attr=GetFileAttributesW(ancestor.c_str());
+        if(attr!=INVALID_FILE_ATTRIBUTES && (!(attr&FILE_ATTRIBUTE_DIRECTORY) || (attr&FILE_ATTRIBUTE_REPARSE_POINT)))return false;
+        if(attr==INVALID_FILE_ATTRIBUTES && !IsMissingError(GetLastError()))return false;
+        auto slash=ancestor.find_last_of(L'\\');if(slash==std::wstring::npos)break;ancestor.resize(slash);
+    }
+    return true;
+}
+
 InstallOwnershipResult CheckInstallOwnership(const std::wstring& installRoot) noexcept {
     const size_t separator = installRoot.find_last_of(L"\\/");
     if (separator == std::wstring::npos || separator == 0) {
@@ -741,9 +765,15 @@ extern "C" __declspec(dllexport) UINT __stdcall BlockCrossFormatInstall(
             return ERROR_INSTALL_FAILURE;
         }
 
-        const std::wstring installRoot =
-            std::wstring(localAppData) + L"\\Programs\\Code-Codex";
+        wchar_t selectedRoot[2048] = {}; DWORD rootLength = 2047;
+        const UINT selectedResult=MsiGetPropertyW(install,L"INSTALLFOLDER",selectedRoot,&rootLength);
+        std::wstring installRoot = selectedResult==ERROR_SUCCESS && rootLength>0 ? std::wstring(selectedRoot) : std::wstring(localAppData) + L"\\Programs\\Code-Codex";
+        while(!installRoot.empty() && (installRoot.back()==L'\\' || installRoot.back()==L'/'))installRoot.pop_back();
         CoTaskMemFree(localAppData);
+        if(!ValidateSelectedInstallRoot(installRoot)) {
+            ReportInstallerError(install,L"Select a dedicated user-writable folder on a fixed local drive without linked ancestors. No files were changed.");
+            return ERROR_INSTALL_FAILURE;
+        }
         switch (CheckInstallOwnership(installRoot)) {
         case InstallOwnershipResult::Missing:
         case InstallOwnershipResult::Msi:
@@ -796,6 +826,19 @@ extern "C" __declspec(dllexport) UINT __stdcall BlockInstallIfExplorerRunning(
 }
 
 extern "C" __declspec(dllexport) UINT __stdcall CleanupMsiSettings(MSIHANDLE install) noexcept {
+    // Centralized user data is retained by default, including direct msiexec removal.
+    // Explicit purge is handled by the ownership-verified standalone finalizer.
+    wchar_t purge[8]={};DWORD size=7;
+    if(MsiGetPropertyW(install,L"PURGEUSERDATA",purge,&size)!=ERROR_SUCCESS || std::wstring(purge)!=L"1") {
+        wchar_t root[2048]={};DWORD count=2047;
+        if(MsiGetPropertyW(install,L"INSTALLFOLDER",root,&count)==ERROR_SUCCESS && count>0) {
+            HKEY key=nullptr;
+            if(RegCreateKeyExW(HKEY_CURRENT_USER,L"Software\\CodeCodex",0,nullptr,0,KEY_SET_VALUE,nullptr,&key,nullptr)==ERROR_SUCCESS) {
+                RegSetValueExW(key,L"RetainedRoot",0,REG_SZ,reinterpret_cast<const BYTE*>(root),(count+1)*sizeof(wchar_t));RegCloseKey(key);
+            }
+        }
+        return ERROR_SUCCESS;
+    }
     try {
         PWSTR localAppData = nullptr;
         const HRESULT result = SHGetKnownFolderPath(
