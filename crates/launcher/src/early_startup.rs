@@ -71,10 +71,24 @@ async fn restore_native_media(
     scope: &str,
     db_name: &str,
     store: &str,
+    preferred_video_ids: &[String],
 ) -> Result<(), String> {
     let listed = crate::renderer_storage::request(json!({"action":"media.list","scope":scope}))
         .map_err(|e| e.to_string())?;
-    for doc in listed.as_array().into_iter().flatten() {
+    let preferred = preferred_video_ids.first().map(String::as_str).unwrap_or("selected");
+    // Never restore a different startup video when the chosen source is unavailable.
+    let video_ids=vec![startup_restore_video_id(&listed,scope,preferred).to_owned()];
+    event(
+        "native startup media",
+        "selection",
+        json!({"scope":scope,"sourceCount":video_ids.len(),"networkRequested":false}),
+    );
+    for doc in listed.as_array().into_iter().flatten().filter(|doc| {
+        scope != "startup"
+            || doc["id"]
+                .as_str()
+                .is_some_and(|id| video_ids.iter().any(|wanted| wanted == id))
+    }) {
         let record_id = doc["id"]
             .as_str()
             .ok_or("Native media identifier unavailable")?;
@@ -130,6 +144,37 @@ async fn restore_native_media(
         work?;
     }
     Ok(())
+}
+
+fn startup_restore_video_id<'a>(listed: &Value, scope: &str, preferred: &'a str) -> &'a str {
+    if scope == "startup" || listed
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|doc| doc["id"] == preferred)
+    {
+        preferred
+    } else {
+        "selected"
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn startup_restore_selects_one_video_without_restoring_library() {
+    let listed = json!([{"id":"selected"},{"id":"second"},{"id":"third"}]);
+    assert_eq!(startup_restore_video_id(&listed, "startup", "second"), "second");
+    assert_eq!(startup_restore_video_id(&listed, "startup", "missing"), "missing");
+    assert_eq!(startup_restore_video_id(&listed, "particle-image", "missing"), "selected");
+    assert_eq!(
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|doc| doc["id"] == startup_restore_video_id(&listed, "startup", "third"))
+            .count(),
+        1
+    );
 }
 
 async fn supervise(
@@ -293,7 +338,7 @@ async fn session(
         ),
     }
     let selected = command(&mut socket, &mut id, "Runtime.evaluate", json!({
-        "expression":"(()=>{try{const s=JSON.parse(localStorage.getItem('code-codex:startup-transition:v1')||'null');return {enabled:s?.enabled===true,backgroundId:s?.enabled&&s.source==='background'?s.backgroundId:''}}catch{return {enabled:false,backgroundId:''}}})()",
+        "expression":"(()=>{try{const s=JSON.parse(localStorage.getItem('code-codex:startup-transition:v1')||'null');return {enabled:s?.enabled===true,backgroundId:s?.enabled&&s.source==='background'?s.backgroundId:'',videoId:s?.selectedVideoId??'selected'}}catch{return {enabled:false,backgroundId:''}}})()",
         "returnByValue":true
     })).await.ok().and_then(|value|value.pointer("/result/value").cloned()).unwrap_or(Value::Null);
     let enabled = selected
@@ -318,7 +363,15 @@ async fn session(
             _ => None,
         };
         if let Some((scope, db, store)) = media {
-            if let Err(reason) = restore_native_media(&mut socket, &mut id, scope, db, store).await
+            if let Err(reason) = restore_native_media(
+                &mut socket,
+                &mut id,
+                scope,
+                db,
+                store,
+                &[selected["videoId"].as_str().unwrap_or("selected").to_owned()],
+            )
+            .await
             {
                 event(
                     "native startup media",
@@ -452,7 +505,7 @@ async fn session(
             let _ = socket.close(None).await;
             return Ok(());
         }
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
 

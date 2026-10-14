@@ -1,5 +1,7 @@
+import { observeStartupVideoPlayback } from './startup-video-playback-metrics';
 import { runtimeEvent } from "./runtime-events";
 import { mountStartupBackground } from "./startup-background";
+import { attachStartupCinema } from "./startup-cinema";
 declare const __CODE_CODEX_STARTUP_TRANSITION_CSS__: string;
 
 export interface StartupTransitionOptions {
@@ -10,7 +12,7 @@ export interface StartupTransitionOptions {
   clipEnd?: number;
   playbackRate?: number;
   videoBrightness?: number;
-  videoFit?: "cover" | "contain";
+  videoFit?: "cover" | "contain" | "cinema";
   minimumVisiblePercent?: number;
   fadePercent?: number;
   fadeDurationMs?: number;
@@ -70,11 +72,12 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
   let revealedAt: number | undefined;
   let readyTimer: number | undefined;
   let exitTimer: number | undefined;
+  let fadeAnimation: Animation | undefined;
   let video: HTMLVideoElement | undefined;
+  let disposeVideoMetrics:(()=>void)|undefined;
+  let cinema: ReturnType<typeof attachStartupCinema> | undefined;
   let background: ReturnType<typeof mountStartupBackground> | undefined;
-  let frame: number | undefined;
   let exitArmed = false;
-  let exitStartedAt: number | undefined;
   let exitReason: "ready" = "ready";
   const clipStart = Math.max(0, options.clipStart ?? 0);
   const clipEnd = Math.max(clipStart + 0.1, options.clipEnd ?? Number.POSITIVE_INFINITY);
@@ -111,9 +114,9 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
     video.autoplay = true;
     video.playsInline = true;
     video.preload = "auto";
+    disposeVideoMetrics=observeStartupVideoPlayback(video,!options.fullScreen);
     video.src = options.videoSrc;
     video.playbackRate = options.playbackRate ?? 1;
-    video.style.objectFit = options.videoFit ?? "cover";
     video.setAttribute("aria-hidden", "true");
     const currentVideo = video;
     let settled = false;
@@ -131,7 +134,7 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
     currentVideo.addEventListener("loadeddata", finishLoading, { once: true });
     currentVideo.addEventListener("error", () => { runtimeEvent("startup-animation","video decode","failed",{preview:!options.fullScreen,mediaErrorCode:currentVideo.error?.code}); finishLoading(); finish("disposed"); }, { once: true });
     currentVideo.addEventListener("loadedmetadata", () => {
-      if (clipStart < currentVideo.duration) currentVideo.currentTime = clipStart;
+      if (clipStart > 0 && clipStart < currentVideo.duration) currentVideo.currentTime = clipStart;
     }, { once: true });
     currentVideo.addEventListener("timeupdate", () => {
       if (phase !== "complete" && currentVideo.currentTime >= Math.min(clipEnd, currentVideo.duration)) currentVideo.currentTime = clipStart;
@@ -140,17 +143,9 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
       if (phase === "complete") return;
       currentVideo.currentTime = clipStart; void currentVideo.play().catch(() => { runtimeEvent("startup-animation","video play","failed",{preview:!options.fullScreen,reason:"loop restart rejected"}); finish("disposed"); });
     });
-    const tick = () => {
-      if (phase === "complete") return;
-      if (exitStartedAt !== undefined) {
-        const opacity = Math.max(0, 1 - (performance.now() - exitStartedAt) / exitDurationMs);
-        overlay.style.opacity = String(opacity);
-        if (opacity === 0) { finish(exitReason); return; }
-      }
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
     overlay.querySelector(".codex-startup__video")?.append(currentVideo);
+    cinema=attachStartupCinema(currentVideo,overlay.querySelector<HTMLElement>(".codex-startup__video")!);
+    cinema.update(options.videoFit??"cover",options.videoBrightness??.8);
   });
 
   function clearTimers(): void {
@@ -164,8 +159,10 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
     phase = "complete";
     settleMediaReady();
     clearTimers();
-    if (frame !== undefined) cancelAnimationFrame(frame);
+    fadeAnimation?.cancel();
+    disposeVideoMetrics?.();
     video?.pause();
+    cinema?.dispose();
     background?.dispose();
     video?.removeAttribute("src");
     video?.load();
@@ -185,10 +182,12 @@ export function mountStartupTransition(options: StartupTransitionOptions): Start
     if (exitDurationMs === 0) { finish(reason); return; }
     exitArmed = true;
     phase = "exiting";
-    exitStartedAt = performance.now();
-    overlay.style.transition = background ? `opacity ${exitDurationMs}ms linear` : "none";
-    overlay.style.opacity = background ? "0" : "1";
-    // Use elapsed time so fade continues across clip loops or a stalled decoder.
+    // One compositor animation for the original video, independent of media clocks.
+    // Explicit endpoints avoid coalescing the first visible frame with opacity=0.
+    overlay.style.transition = 'none';
+    fadeAnimation = overlay.animate([{ opacity: 1 }, { opacity: 0 }], { duration: exitDurationMs, easing: 'linear', fill: 'both' });
+    if(document.timeline.currentTime!==null)fadeAnimation.startTime=document.timeline.currentTime;
+    overlay.style.opacity = '0';
     if (exitTimer !== undefined) window.clearTimeout(exitTimer);
     exitTimer = window.setTimeout(() => finish(reason), exitDurationMs);
   }

@@ -4,7 +4,7 @@ import { loadStartupVideo, type StartupVideo } from "./startup-transition-media"
 import { runtimeEvent } from "./runtime-events";
 import { mountStartupTransition, type StartupTransitionController } from "./startup-transition";
 
-import { readStartupTransitionSettings, type StartupTransitionSettings } from './startup-transition-settings';
+import { readStartupTransitionSettings, settingsForStartupVideo, startupPlaybackVideoId, type StartupTransitionSettings } from './startup-transition-settings';
 const LAUNCH_STATE = Symbol.for("code-codex:startup-transition:launch:v1");
 const CONTROLLER_STATE = Symbol.for("code-codex:startup-transition:controller:v1");
 const VISUAL_READY_PROPERTY = "__CODE_CODEX_STARTUP_VISUAL_READY__";
@@ -55,6 +55,7 @@ export async function startStartupTransitionOnLaunch(splashActive: boolean, load
   }
   setStartupBackgroundHold(true);
   let url: string | undefined;
+  runtimeEvent('startup-animation','playback mode','selected',{source:settings.source,playback:'original video with live settings'});
   let controller: StartupTransitionController | undefined;
   try {
     runtimeEvent('startup-animation','source','selected',{source:settings.source,backgroundId:settings.source==='background'?settings.backgroundId:null});
@@ -66,11 +67,13 @@ export async function startStartupTransitionOnLaunch(splashActive: boolean, load
     let lookupReason = "no stored video";
     let lookupTimer: number | undefined;
     const video = await Promise.race([
-      loadStartupVideo().catch(error => { lookupReason=error instanceof Error ? `storage error: ${error.name}: ${error.message}` : `storage error: ${String(error)}`;return null; }),
+      loadStartupVideo(startupPlaybackVideoId(settings)).catch(error => { lookupReason=error instanceof Error ? `storage error: ${error.name}: ${error.message}` : `storage error: ${String(error)}`;return null; }),
       new Promise<null>((resolve) => { lookupTimer=window.setTimeout(() => {lookupReason="video lookup exceeded 10000 ms";resolve(null);},10000); }),
     ]);
     if (lookupTimer!==undefined) clearTimeout(lookupTimer);
-    if (!video) { runtimeEvent("startup-animation","video lookup","failed",{reason:lookupReason}); resolveVisualReady?.(false); return undefined; }
+    if (!video) { runtimeEvent("startup-animation","video lookup","failed",{reason:lookupReason,selectedVideoId:settings.selectedVideoId,fallbackToAnotherVideo:false}); resolveVisualReady?.(false); return undefined; }
+    const videoSettings=settingsForStartupVideo(settings,video.id,video.duration);
+    runtimeEvent("startup-animation","video library selection","passed",{mode:settings.playbackMode,videoId:video.id,libraryCount:settings.videoOrder.length,fit:videoSettings.videoFit});
     runtimeEvent("startup-animation","video lookup","passed",{bytes:video.blob.size,duration:video.duration,clipStart:settings.clipStart,clipEnd:settings.clipEnd,playbackRate:settings.playbackRate,minimumVisiblePercent:settings.minimumVisiblePercent,fadePercent:settings.fadePercent});
     if (loadingOnly && startupDocumentReady()) { runtimeEvent("startup-animation","launch playback","skipped",{reason:"native document already ready"}); resolveVisualReady?.(false); return undefined; }
     url = URL.createObjectURL(video.blob);
@@ -78,9 +81,9 @@ export async function startStartupTransitionOnLaunch(splashActive: boolean, load
       target: document.body,
       fullScreen: true,
       ...(url ? { videoSrc: url } : {}),
-      ...videoOptions(settings, video),
-      minimumVisiblePercent: settings.minimumVisiblePercent,
-      fadePercent: settings.fadePercent,
+      ...videoOptions(videoSettings, video),
+      minimumVisiblePercent: videoSettings.minimumVisiblePercent,
+      fadePercent: videoSettings.fadePercent,
       onComplete: () => { setStartupBackgroundHold(false); if (url) URL.revokeObjectURL(url); },
     });
     }
@@ -99,6 +102,7 @@ export async function startStartupTransitionOnLaunch(splashActive: boolean, load
       return undefined;
     }
     controller.markRevealed();
+
     runtimeEvent("startup-animation","first painted frame","revealed",{phase:controller.phase});
     resolveVisualReady?.(true);
     return controller;

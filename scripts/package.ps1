@@ -1,11 +1,12 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.4.25",
+    [string]$Version = "0.4.47",
     [string]$WixPath
 )
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+& (Join-Path $PSScriptRoot 'assert-storage-contract.ps1')
 $Artifacts = Join-Path $RepoRoot "artifacts"
 $Stage = Join-Path $Artifacts "CodeCodex-$Version-x64"
 $ExpectedStageRoot = [IO.Path]::GetFullPath($Artifacts) + [IO.Path]::DirectorySeparatorChar

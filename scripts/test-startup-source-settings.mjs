@@ -134,7 +134,7 @@ try {
   await open();
   // Preserve only this fixture's generated record, then use the production
   // Remove button to exercise the empty-video state without changing settings.
-  await evaluate(`(async()=>{window.fixtureSavedVideo=await new Promise((resolve,reject)=>{const request=indexedDB.open('code-codex-startup-transition',1);request.onerror=()=>reject(request.error);request.onsuccess=()=>{const db=request.result,read=db.transaction('video','readonly').objectStore('video').get('selected');read.onsuccess=()=>{db.close();resolve(read.result)};read.onerror=()=>{db.close();reject(read.error)}}});${shadow}.querySelector('.startupTransition-remove').click();})()`);
+  await evaluate(`(async()=>{window.fixtureSavedVideo=await new Promise((resolve,reject)=>{const request=indexedDB.open('code-codex-startup-transition',1);request.onerror=()=>reject(request.error);request.onsuccess=()=>{const db=request.result,read=db.transaction('video','readonly').objectStore('video').get('selected');read.onsuccess=()=>{db.close();resolve(read.result)};read.onerror=()=>{db.close();reject(read.error)}}});${shadow}.querySelector('.startupTransition-library .particle-library-item.is-selected .particle-library-delete').click();})()`);
   for (let i = 0; i < 100 && await evaluate(`!!${shadow}.querySelector('.startupTransition-video-still').src`); i++) await delay(30);
   await switchSource('background');
   await evaluate(`${shadow}.querySelector('.startupTransition-close').click()`);
@@ -181,7 +181,9 @@ try {
   }
 }
 finally {
-  if (socket?.readyState === WebSocket.OPEN) await Promise.race([command('Browser.close', {}, undefined).catch(() => {}), delay(2000)]);
+  // null selects the browser connection; undefined would reapply the active
+  // page session default and can leave Chromium's profile locked on Windows.
+  if (socket?.readyState === WebSocket.OPEN) await Promise.race([command('Browser.close', {}, null).catch(() => {}), delay(3000)]);
   socket?.close();
   if (browser.exitCode === null) browser.kill();
   for (let i = 0; i < 30 && browser.exitCode === null; i++) await delay(100);
@@ -193,7 +195,13 @@ finally {
   const resolvedProfile = resolve(profile);
   const expectedPrefix = resolve(tmpdir()) + sep + 'code-codex-startup-source-test-';
   assert.ok(resolvedProfile.startsWith(expectedPrefix));
-  try { rmSync(resolvedProfile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); report.cleanup.profileRemoved = true; }
+  try {
+    for(let attempt=0;attempt<8;attempt++){
+      await delay(250);
+      try{rmSync(resolvedProfile,{recursive:true,force:true,maxRetries:3,retryDelay:150});report.cleanup.profileRemoved=true;break;}
+      catch(error){if(attempt===7||!['EPERM','EBUSY','ENOTEMPTY'].includes(error.code))throw error;}
+    }
+  }
   catch (error) { report.cleanup.profileRemoved = false; report.cleanup.error = String(error); report.failures.push('temporary browser profile cleanup'); }
   report.passed = report.failures.length === 0;
   writeFileSync(join(directory, 'results.json'), JSON.stringify(report, null, 2));

@@ -1,3 +1,13 @@
+## 本地维护 v0.4.47 / Local maintenance v0.4.47
+
+启动动画固定播放素材库中当前选中的视频。普通播放器和原生早期启动均忽略旧轮播游标；开始播放后不会切换下次素材，旧sequence/random设置保留选中ID并迁移成fixed。所选原视频缺失时记录ID和失败原因并跳过动画，不改播另一视频。视频库、逐素材参数、基础实时预览、加号卡片与叉号删除保持。
+
+Startup包升级为1.1.17；核心47与所选视频恢复规则同步，其他23包/默认媒体不变。上一轮46的基础模式、卡片操作、诊断和安装修复保持。本轮只修复选源，此前发现的就绪长等待问题尚未改动；完整官方冷启动未重启验证，当前为本地维护版本，未发布GitHub。
+
+Startup always plays the video currently selected in the library. Both the normal player and native early startup ignore legacy rotation cursors and never advance the selection after playback begins. Legacy sequence/random settings retain the selected ID and normalize to fixed playback. A missing selected original is logged and skipped instead of substituting another video. The library, per-video profiles, realtime preview, plus card and delete cross remain.
+
+Startup package is 1.1.17; core 47 uses the matching selected-source restoration rule. The other 23 plugins and default media remain unchanged. This change addresses source selection only; the previously observed readiness wait remains unresolved. A full official-app cold launch has not been restarted for validation, and this local maintenance build has not been published to GitHub. Earlier records follow.
+
 ## v0.4.25 — 代码缩略图、启动诊断与旧版本清理
 
 ## 简体中文
