@@ -38,6 +38,12 @@ await wait(`document.querySelector('${tag}')?.dataset.state==='ready'`,'tree rea
 await wait(`[...${s}.querySelectorAll('.preview-extension-action')].every(button=>button.textContent==='Download')`,'all cold catalog actions settled');
 await check('every declared plugin has a cold Download card',`${s}.querySelectorAll('.preview-extension').length===${catalog.length}&&[...${s}.querySelectorAll('.preview-extension-action')].every(button=>button.textContent==='Download')`);
 assert.deepEqual(await e(`[...${s}.querySelectorAll('.preview-extension h4')].map(node=>node.textContent.trim()).sort()`),catalog.map(p=>p.name).sort(),'Market titles cover the declared catalog without missing or duplicate cards');
+await check('all catalog cards have distinct decorative host icons',`(()=>{const nodes=[...${s}.querySelectorAll('.preview-extension-icon')];return nodes.length===${catalog.length}&&nodes.every(n=>n.dataset.pluginIcon&&n.querySelector('svg[aria-hidden="true"][focusable="false"]'))&&new Set(nodes.map(n=>n.innerHTML)).size===nodes.length;})()`);
+for(const theme of ['dark','light']){
+ await e(`document.documentElement.dataset.theme='${theme}'`);
+ await check('uniform icon grammar in '+theme,`(()=>{const nodes=[...${s}.querySelectorAll('.preview-extension-icon')];const styles=nodes.map(n=>{const a=getComputedStyle(n),b=getComputedStyle(n.querySelector('svg'));return [a.width,a.height,a.color,a.backgroundColor,a.borderRadius,b.width,b.height,b.fill,b.strokeWidth,b.strokeLinecap,b.strokeLinejoin].join('|');});return new Set(styles).size===1&&nodes.every(n=>getComputedStyle(n.querySelector('svg')).fill==='none');})()`);
+}
+await e(`document.documentElement.dataset.theme='dark'`);
 const glow=`${s}.querySelector('[data-appearance-plugin="code-codex.glow-horizon-background"]')`;
 await wait(`${glow}.querySelector('.preview-extension-action').textContent==='Download'`,'cold package Download');
 await check('cold settings disabled',`${glow}.querySelector('.particle-settings-trigger').disabled`);
@@ -55,6 +61,17 @@ await check('second enable no second download',`calls.filter(c=>c.method==='expl
 await e(`${glow}.querySelector('.preview-extension-action').click()`);await wait(`${glow}.querySelector('.preview-extension-action').textContent==='Disable'`,'cached Enable');
 await check('cached module loaded once',`calls.filter(c=>c.method==='explorer.plugins.load'&&c.params.id==='glow-horizon').length===1`);
 report.errors=await e('errors');assert.deepEqual(report.errors,[]);
+const originalIcons=await e(`[...${s}.querySelectorAll('[data-plugin-icon]')].map(n=>n.innerHTML)`);
+for(const [index,locale] of ['zh-CN','en'].entries()){
+ await e(`window[Symbol.for('code-codex:language-service:v1')].applyLanguage({schema:1,locale:'${locale}',revision:${200+index},source:'menu'})`);await delay(60);
+ assert.deepEqual(await e(`[...${s}.querySelectorAll('[data-plugin-icon]')].map(n=>n.innerHTML)`),originalIcons,'Language switch preserves every icon');
+}
+await browser.command('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:false});
+await check('narrow market retains icon size and contains SVG',`[...${s}.querySelectorAll('[data-plugin-icon]')].filter(n=>n.getBoundingClientRect().width>0).every(n=>{const a=n.getBoundingClientRect(),b=n.querySelector('svg').getBoundingClientRect();return Math.round(a.width)===38&&b.width===23&&b.left>=a.left&&b.right<=a.right;})`);
+await browser.command('Emulation.clearDeviceMetricsOverride');
+await e(`(()=>{const root=${s};const gallery=document.createElement('div');gallery.id='icon-gallery';gallery.setAttribute('popover','manual');gallery.style.cssText='position:fixed;inset:20px;margin:0;padding:24px;box-sizing:border-box;border:1px solid var(--cle-rule);border-radius:12px;background:var(--cle-paper);color:var(--cle-ink);display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px;font:14px system-ui;align-content:start';for(const card of root.querySelectorAll('.preview-extension')){const row=document.createElement('div');row.style.cssText='display:flex;gap:12px;align-items:center;min-height:100px';row.append(card.querySelector('.preview-extension-icon').cloneNode(true));const label=document.createElement('span');label.textContent=card.querySelector('h4').textContent;row.append(label);gallery.append(row);}root.append(gallery);gallery.showPopover();})()`);
+for(const theme of ['light','dark']){await e(`document.documentElement.dataset.theme='${theme}'`);await delay(80);const shot=await browser.command('Page.captureScreenshot');mkdirSync(resolve(root,'artifacts/background-packages'),{recursive:true});writeFileSync(resolve(root,'artifacts/background-packages/icons-'+theme+'.png'),Buffer.from(shot.data,'base64'));}
+await e(`${s}.querySelector('#icon-gallery').remove()`);
 const screenshot=await browser.command('Page.captureScreenshot');mkdirSync(resolve(root,'artifacts/background-packages'),{recursive:true});writeFileSync(resolve(root,'artifacts/background-packages/market.png'),Buffer.from(screenshot.data,'base64'));
 }catch(error){report.failures.push(error.stack??String(error));if(browser)report.debug=await browser.evaluate(`({errors:window.errors,cards:[...document.querySelector('${tag}')?.shadowRoot?.querySelectorAll('[data-appearance-plugin]')??[]].map(x=>({id:x.dataset.appearancePlugin,text:x.textContent})),calls:window.calls})`).catch(()=>{});}
 finally{await browser?.close();await new Promise(r=>server.close(r));mkdirSync(resolve(root,'artifacts/background-packages'),{recursive:true});writeFileSync(resolve(root,'artifacts/background-packages/fixture.json'),JSON.stringify(report,null,2));}

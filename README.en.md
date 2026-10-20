@@ -35,6 +35,8 @@ Version **v0.5.7** collects the changes since v0.4.52: global Chinese/English se
 
 A subdued green arrow appears beside the version when an update is available; an up-to-date version has no arrow.
 
+> Local development candidate **v0.5.9** includes26 distinct market icons with a shared outline style and adds **ASCII Tiles Background**: ASCII glass tiles, continuous drag/click waves, grouped parameter resets and shared transparent surfaces. Its catalog has26 plugins (15 Appearance); the25 existing public packages retain their identities and URLs. The new resource is not public yet and requires verified local candidate import. The current public software release remains v0.5.7.
+
 ## Install Option 1: Download EXE
 
 Download the installer from [GitHub Release v0.5.7](https://github.com/Rice-dog/code-codex/releases/tag/v0.5.7). [`releases`](releases/) retains the corresponding build assets:

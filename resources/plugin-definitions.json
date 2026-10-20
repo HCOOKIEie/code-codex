@@ -299,6 +299,18 @@
       "capabilities": [
         "file-preview"
       ]
+    },
+    {
+      "id": "ascii-tiles",
+      "name": "ASCII Tiles Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.0",
+      "releaseTag": "v0.5.8",
+      "capabilities": [
+        "background",
+        "preview"
+      ]
     }
   ]
 }

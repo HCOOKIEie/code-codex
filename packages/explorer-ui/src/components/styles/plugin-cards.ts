@@ -39,6 +39,21 @@ export const style5 = String.raw`  .preview-extension {
     stroke-linejoin: round;
   }
   .preview-extension-copy { min-width: 0; }
+  /* Host-owned artwork shares one visual grammar, overriding legacy per-plugin accents. */
+  .preview-extension .preview-extension-icon[data-plugin-icon] {
+    color: var(--cle-icon-blue);
+    background: color-mix(in srgb, var(--cle-icon-blue) 10%, var(--cle-paper));
+    border-color: color-mix(in srgb, var(--cle-icon-blue) 20%, var(--cle-rule));
+  }
+  .preview-extension .preview-extension-icon[data-plugin-icon] svg {
+    width: 23px;
+    height: 23px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.15;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
   .preview-extension-title-row {
     display: flex;
     align-items: flex-start;

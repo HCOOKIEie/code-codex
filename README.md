@@ -32,6 +32,8 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 
 有新版可升级时，版本号右侧显示低调的绿色小箭头；已是最新版时不显示箭头。
 
+> 本地开发候选 **v0.5.9** 包含独立图形、统一描边的26款市场图标，并新增 **ASCII Tiles Background**：字符玻璃砖、连续拖动/点击波纹、分组参数重置及公共透明底板。候选目录共26个插件（Appearance15）；现有25个公开插件的版本和下载地址保持。新插件资源尚未公开，需要校验后的本地候选导入；当前公开软件版本仍是v0.5.7。
+
 ## 安装方式一：直接下载 EXE
 
 推荐从 [GitHub Release v0.5.7](https://github.com/Rice-dog/code-codex/releases/tag/v0.5.7) 下载安装包；[`releases`](releases/) 保留对应构建资产：
