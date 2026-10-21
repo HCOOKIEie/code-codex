@@ -37,6 +37,10 @@ export class ParticleBackgroundController {
   #initialization: Promise<void> | undefined;
   #enabled = false;
   #pending = false;
+  // Routine image swaps track their own activity; pending stays reserved for
+  // appearance transitions so BackgroundActions.busy does not flap during
+  // auto-switch rotation.
+  #imageBusy = false;
   #error: string | undefined;
   #imageTransformSaveError: string | undefined;
   #layer: HTMLDivElement | undefined;
@@ -221,6 +225,7 @@ export class ParticleBackgroundController {
     const hadPresentation = this.#enabled || this.#pending || Boolean(this.#layer);
     this.#enabled = false;
     this.#pending = false;
+    this.#imageBusy = false;
     this.#generation += 1;
     if (hadPresentation) this.#teardownPresentation();
     if (pendingEnable) await pendingEnable.catch(() => undefined);
@@ -255,7 +260,7 @@ export class ParticleBackgroundController {
   }
 
   replayOpening(): void {
-    if (!this.#enabled || this.#pending || !this.#renderer?.count || !this.#settings.introEnabled) return;
+    if (!this.#enabled || this.#pending || this.#imageBusy || !this.#renderer?.count || !this.#settings.introEnabled) return;
     this.#renderer.replayOpening();
     this.#scheduleRotation();
     runtimeEvent("particle-image", "opening replay", "started", {
@@ -456,6 +461,7 @@ export class ParticleBackgroundController {
     this.#disposed = true;
     this.#enabled = false;
     this.#pending = false;
+    this.#imageBusy = false;
     this.#generation += 1;
     this.#teardownPresentation();
     this.#database?.close();
@@ -503,7 +509,7 @@ export class ParticleBackgroundController {
     if (!record) return false;
     this.#stopRotation();
     const generation = ++this.#generation;
-    this.#pending = true;
+    this.#imageBusy = true;
     this.#notify();
     let activated = false;
     try {
@@ -538,7 +544,7 @@ export class ParticleBackgroundController {
       return false;
     } finally {
       if (generation === this.#generation) {
-        this.#pending = false;
+        this.#imageBusy = false;
         this.#notify();
         if (activated) this.#scheduleRotation();
       }
@@ -692,6 +698,7 @@ export class ParticleBackgroundController {
 
   #clearActiveImage(): void {
     this.#generation += 1;
+    this.#imageBusy = false;
     this.#preparationCache?.invalidate();
     this.#renderer?.dispose();
     if (this.#canvas) {
@@ -750,6 +757,7 @@ export class ParticleBackgroundController {
       !this.#enabled
       || Boolean(this.#editingImageId)
       || this.#pending
+      || this.#imageBusy
       || !this.#settings.autoSwitch
       || document.hidden
       || this.#reducedMotion.matches
@@ -922,6 +930,7 @@ export class ParticleBackgroundController {
     if (!this.#enabled) return;
     this.#enabled = false;
     this.#pending = false;
+    this.#imageBusy = false;
     this.#generation += 1;
     this.#error = "Particle Image Background stopped because Codex Appearance is no longer Dark.";
     this.#stoppedForExternalThemeChange = true;
