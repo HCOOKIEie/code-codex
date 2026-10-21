@@ -14,7 +14,6 @@ mod process_guard;
 mod renderer_storage;
 mod runtime_log;
 mod startup_conflict;
-mod login_startup;
 mod startup_diagnostics;
 mod startup_examples;
 mod support_checks;
@@ -90,13 +89,6 @@ enum Commands {
     Diagnose(DiagnoseArgs),
     /// Revoke permission to automatically close and reopen an existing Codex instance.
     ResetStartupRecovery,
-    /// Inspect, enable or disable this user's Code-Codex login startup entry.
-    LoginStartup {
-        #[arg(long, conflicts_with = "disable")]
-        enable: bool,
-        #[arg(long)]
-        disable: bool,
-    },
     /// Private identity-checked native worker; inspection is read-only by default.
     #[command(hide = true)]
     StartupRecoveryWindow {
@@ -148,9 +140,6 @@ struct RunArgs {
     /// Development override. The UI still receives compatible=false.
     #[arg(long)]
     allow_unsupported_version: bool,
-    /// Used only by the opt-in Windows login entry; never grants restart consent.
-    #[arg(long, hide = true)]
-    login_startup: bool,
 }
 
 #[derive(Debug, Args)]
@@ -267,25 +256,6 @@ enum LaunchFailure {
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
-    if let Some(Commands::LoginStartup { enable, disable }) = &cli.command {
-        let result = if *enable {
-            login_startup::set(true)
-        } else if *disable {
-            login_startup::set(false)
-        } else {
-            login_startup::status()
-        };
-        return match result {
-            Ok(state) => {
-                println!("{}", serde_json::json!(state));
-                ExitCode::SUCCESS
-            }
-            Err(error) => {
-                eprintln!("Login startup: {error}");
-                ExitCode::from(22)
-            }
-        };
-    }
     // Small JSON/text protocol: no GUI diagnostics or CDP discovery in this worker.
     if let Some(Commands::StartupRecoveryWindow { pid, created_ms, image, close }) = &cli.command {
         return startup_conflict::window_operation(*pid, *created_ms, image, *close);
@@ -300,7 +270,6 @@ async fn main() -> ExitCode {
         Commands::Activate(_) => "activate",
         Commands::Diagnose(_) => "diagnose",
         Commands::ResetStartupRecovery => "reset-startup-recovery",
-        Commands::LoginStartup { .. } => "login-startup",
         Commands::StartupRecoveryWindow { .. } => "startup-recovery-window",
         Commands::Plugins { .. } => "plugins",
     };
@@ -310,7 +279,6 @@ async fn main() -> ExitCode {
     begin_startup_trace(mode);
     let result = match command {
         Commands::Run(args) => run(args).await,
-        Commands::LoginStartup { .. } => unreachable!("handled before initialization"),
         Commands::Attach(args) => attach(args).await,
         Commands::Activate(args) => activate(args).await,
         Commands::Diagnose(args) => diagnose(args).await,
@@ -991,17 +959,6 @@ mod tests {
             AppError::StartupConflict("fixture".into()).startup_diagnostic().code,
             "CC-START-STATE-002"
         );
-    }
-
-    #[test]
-    fn login_startup_is_opt_in_and_has_an_independent_revoke_command() {
-        let Cli { command: Some(Commands::Run(args)), .. } = Cli::try_parse_from(["code-codex", "run"]).unwrap() else { panic!("run command"); };
-        assert!(!args.login_startup);
-        let Cli { command: Some(Commands::Run(args)), .. } = Cli::try_parse_from(["code-codex", "run", "--login-startup"]).unwrap() else { panic!("login run command"); };
-        assert!(args.login_startup);
-        assert!(Cli::try_parse_from(["code-codex", "login-startup", "--enable", "--disable"]).is_err());
-        assert!(matches!(Cli::try_parse_from(["code-codex", "login-startup", "--disable"]).unwrap().command,
-            Some(Commands::LoginStartup { enable: false, disable: true })));
     }
 
     #[test]
