@@ -1250,6 +1250,16 @@ export class CodeCodexElement extends HTMLElement {
                 this.#showActionNotice(error instanceof Error ? error.message : String(error), "error");
         });
     }
+    async getLoginStartup(): Promise<import('../contracts/login-startup').LoginStartupStatus> {
+        const bridge = this.#workspaceSession.bridge;
+        if (!bridge?.available) throw new Error('Code-Codex is disconnected');
+        return bridge.request('explorer.login.startup.get', {});
+    }
+    async setLoginStartup(enabled: boolean): Promise<import('../contracts/login-startup').LoginStartupStatus> {
+        const bridge = this.#workspaceSession.bridge;
+        if (!bridge?.available) throw new Error('Code-Codex is disconnected');
+        return bridge.request('explorer.login.startup.set', { enabled });
+    }
     async disable(): Promise<void> {
         if (this.#disableButton.disabled)
             return;

@@ -34,6 +34,8 @@ jobs:
         run: |
           cargo test --release --locked -p code-codex --bin code-codex startup_conflict:: -- --test-threads=1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --release --locked -p code-codex --bin code-codex login_startup -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --release --locked -p code-codex --bin code-codex tests::automatic_restart_permission_has_an_explicit_reset_command -- --exact
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --release --locked -p code-codex --bin code-codex tests::user_visible_launcher_failures_have_stable_exit_categories -- --exact
@@ -59,6 +61,8 @@ jobs:
       - run: node scripts/generate-installer.mjs
       - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-worker-protocol.ps1
       - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-uninstall-completion.ps1
+      - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-login-startup-installer.ps1
       - run: powershell -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File scripts/test-startup-conflict.ps1
       - run: node --test scripts/test-refactor-contracts.mjs scripts/test-plugin-publication.mjs scripts/test-maintenance-isolation.mjs scripts/test-file-mutation-isolation.mjs
       - run: node scripts/test-background-surfaces.mjs
+      - run: node scripts/test-login-startup.mjs

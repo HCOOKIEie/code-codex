@@ -5,6 +5,11 @@ official Codex instance is already open. The dialog warns about interrupted task
 and unsaved changes, with an optional remembered choice. See [startup conflict
 recovery](docs/startup-conflict-recovery.md) for revocation and validation limits.
 
+The top **Code-Codex** menu offers **Start Code-Codex when I sign in**, off by
+default and reversible. It never changes official Codex startup or grants restart
+consent. Upgrades preserve the choice; uninstall removes the entry. See
+[Windows login startup](docs/login-startup.md) for CLI revocation and limits.
+
 [简体中文](README.md) | English
 
 <p align="center">

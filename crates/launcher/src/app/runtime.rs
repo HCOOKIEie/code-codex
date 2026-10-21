@@ -54,10 +54,15 @@ pub(super) fn default_run_args() -> RunArgs {
         channel: ChannelPreference::Stable,
         codex_args: Vec::new(),
         allow_unsupported_version: false,
+        login_startup: false,
     }
 }
 
 pub(super) async fn run(args: RunArgs) -> Result<(), AppError> {
+    if args.login_startup && !crate::login_startup::status().is_ok_and(|state| state.enabled) {
+        record_startup_event("login startup", "disabled or unverified registration; queued login launch skipped");
+        return Ok(());
+    }
     record_startup_event("arguments", "validating launch arguments");
     validate_extra_arguments(&args.codex_args)?;
     record_startup_event("discovery", "finding official Codex installation");
@@ -98,7 +103,13 @@ pub(super) async fn run(args: RunArgs) -> Result<(), AppError> {
                 record_startup_event("existing process", "restart cancelled; existing Codex preserved");
                 return Ok(());
             }
-            crate::startup_conflict::Outcome::Managed => return Err(AppError::AlreadyRunning),
+            crate::startup_conflict::Outcome::Managed => {
+                if args.login_startup {
+                    record_startup_event("existing process", "login launch skipped; existing debug-managed Codex preserved");
+                    return Ok(());
+                }
+                return Err(AppError::AlreadyRunning);
+            }
             crate::startup_conflict::Outcome::ReadyWithPreferenceWarning => {
                 // Only persistence failed, after the inspected process exited.
                 // Keep the same fresh process check and normal launch path.
