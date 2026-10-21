@@ -13,6 +13,7 @@ mod process_diagnostics;
 mod process_guard;
 mod renderer_storage;
 mod runtime_log;
+mod startup_conflict;
 mod startup_diagnostics;
 mod startup_examples;
 mod support_checks;
@@ -86,6 +87,20 @@ enum Commands {
     Activate(ActivateArgs),
     /// Report package, bundle, App Server, and optional CDP diagnostics.
     Diagnose(DiagnoseArgs),
+    /// Revoke permission to automatically close and reopen an existing Codex instance.
+    ResetStartupRecovery,
+    /// Private identity-checked native worker; inspection is read-only by default.
+    #[command(hide = true)]
+    StartupRecoveryWindow {
+        #[arg(long)]
+        pid: u32,
+        #[arg(long)]
+        created_ms: u64,
+        #[arg(long)]
+        image: PathBuf,
+        #[arg(long)]
+        close: bool,
+    },
     /// Inspect cached first-party backgrounds, or import verified offline release assets.
     Plugins {
         #[arg(long)]
@@ -204,6 +219,8 @@ enum AppError {
         "Codex Desktop is already running without this launcher; close it and start Code-Codex again"
     )]
     AlreadyRunning,
+    #[error("startup conflict recovery failed: {0}")]
+    StartupConflict(String),
     #[error("a security-sensitive Codex launch argument was rejected")]
     InvalidLaunchArgument,
     #[error("attach requires a listener owned by an official packaged Codex installation")]
@@ -239,6 +256,10 @@ enum LaunchFailure {
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
+    // Small JSON/text protocol: no GUI diagnostics or CDP discovery in this worker.
+    if let Some(Commands::StartupRecoveryWindow { pid, created_ms, image, close }) = &cli.command {
+        return startup_conflict::window_operation(*pid, *created_ms, image, *close);
+    }
     initialize_logging(cli.log_format);
     let command = cli
         .command
@@ -248,6 +269,8 @@ async fn main() -> ExitCode {
         Commands::Attach(_) => "attach",
         Commands::Activate(_) => "activate",
         Commands::Diagnose(_) => "diagnose",
+        Commands::ResetStartupRecovery => "reset-startup-recovery",
+        Commands::StartupRecoveryWindow { .. } => "startup-recovery-window",
         Commands::Plugins { .. } => "plugins",
     };
     if mode != "diagnose" || matches!(&command, Commands::Diagnose(args) if args.full) {
@@ -259,6 +282,11 @@ async fn main() -> ExitCode {
         Commands::Attach(args) => attach(args).await,
         Commands::Activate(args) => activate(args).await,
         Commands::Diagnose(args) => diagnose(args).await,
+        Commands::ResetStartupRecovery => startup_conflict::reset()
+            .map(|()| println!("{}", gui_support::localization::text("Automatic restart permission cleared. Code-Codex will ask next time.")))
+            .map_err(AppError::StartupConflict),
+        Commands::StartupRecoveryWindow { pid, created_ms, image, close } =>
+            return startup_conflict::window_operation(pid, created_ms, &image, close),
         Commands::Plugins { import_dir } => {
             let result = if let Some(directory) = import_dir {
                 plugin_store::import_directory(&directory)
@@ -909,12 +937,27 @@ mod tests {
             exit_codes::ALREADY_RUNNING
         );
         assert_eq!(
+            AppError::StartupConflict("fixture".into()).exit_code(),
+            exit_codes::STARTUP_FAILURE
+        );
+        assert_eq!(
             AppError::Launch(LaunchFailure::PackageSupervision).exit_code(),
             exit_codes::STARTUP_FAILURE
         );
         assert_eq!(
             AppError::InvalidLaunchArgument.exit_code(),
             exit_codes::GENERIC_FAILURE
+        );
+    }
+
+    #[test]
+    fn automatic_restart_permission_has_an_explicit_reset_command() {
+        let cli = Cli::try_parse_from(["code-codex", "reset-startup-recovery"])
+            .expect("permission reset command");
+        assert!(matches!(cli.command, Some(Commands::ResetStartupRecovery)));
+        assert_eq!(
+            AppError::StartupConflict("fixture".into()).startup_diagnostic().code,
+            "CC-START-STATE-002"
         );
     }
 

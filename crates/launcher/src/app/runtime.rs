@@ -86,7 +86,36 @@ pub(super) async fn run(args: RunArgs) -> Result<(), AppError> {
     }
     record_startup_event("existing process", "checking for conflicting Codex process");
     if is_executable_running(&installation.executable)? {
-        return Err(AppError::AlreadyRunning);
+        if installation.source != DiscoverySource::WindowsPackageManager {
+            return Err(AppError::AlreadyRunning);
+        }
+        record_startup_event("existing process", "offering consent-based graceful restart");
+        match crate::startup_conflict::resolve(&installation.executable)
+            .await
+            .map_err(AppError::StartupConflict)?
+        {
+            crate::startup_conflict::Outcome::Cancelled => {
+                record_startup_event("existing process", "restart cancelled; existing Codex preserved");
+                return Ok(());
+            }
+            crate::startup_conflict::Outcome::Managed => return Err(AppError::AlreadyRunning),
+            crate::startup_conflict::Outcome::ReadyWithPreferenceWarning => {
+                // Only persistence failed, after the inspected process exited.
+                // Keep the same fresh process check and normal launch path.
+                record_startup_event("existing process", "restart preference persistence not confirmed; continuing this launch");
+                runtime_log::record("launcher", "startup restart preference", "warning", json!({
+                    "code":"CC-START-PREF-001",
+                    "launchContinues":true,
+                    "consentPersistence":"not confirmed",
+                    "nextLaunch":"re-read stored consent; never infer permission from this warning"
+                }));
+                tracing::warn!(code="CC-START-PREF-001", "Restart preference persistence could not be confirmed; this launch continues and future launches re-check stored consent");
+            }
+            crate::startup_conflict::Outcome::Ready => {}
+        }
+        if is_executable_running(&installation.executable)? {
+            return Err(AppError::AlreadyRunning);
+        }
     }
     record_startup_event("existing process", "no conflicting process");
 

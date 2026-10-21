@@ -1,5 +1,10 @@
 # Code-Codex
 
+Windows startup can offer a consent-based graceful restart when an unmanaged
+official Codex instance is already open. The dialog warns about interrupted tasks
+and unsaved changes, with an optional remembered choice. See [startup conflict
+recovery](docs/startup-conflict-recovery.md) for revocation and validation limits.
+
 [简体中文](README.md) | English
 
 <p align="center">
