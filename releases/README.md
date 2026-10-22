@@ -1,6 +1,6 @@
-# Code-Codex v0.5.20
+# Code-Codex v0.5.21
 
-本次正式软件更新覆盖 **v0.5.7 → v0.5.20** 的完整保留变更；期间的本地版本及插件兼容资源发布不另算软件更新。
+本次正式软件更新覆盖 **v0.5.7 → v0.5.21** 的完整保留变更；期间的本地版本及插件兼容资源发布不另算软件更新。
 
 ## 简体中文
 
@@ -19,7 +19,7 @@ EXE/ZIP 用户可在原安装目录更新，保留设置、原素材及匹配的
 
 ## English
 
-This software update covers all retained changes from **v0.5.7 to v0.5.20**. Intermediate local builds and compatibility-resource prereleases are not separate software updates.
+This software update covers all retained changes from **v0.5.7 to v0.5.21**. Intermediate local builds and compatibility-resource prereleases are not separate software updates.
 
 - **ASCII Tiles Background:** Adds a WebGL2 background with glyph/glass controls, mouse pressing and rebound, neighboring-tile propagation and grouped resets. Fixes the faint screen-wide moving grid, reverse rebound and dark cursor veil while preserving the pressed glass-face effect. Ports the Web effect's diagonal tile entrance without replaying the background when its settings panel opens.
 - **Distinct, consistent plugin icons:** All26 plugins have individual functional artwork with shared outline weight, sizing and theme colors instead of repeated eye placeholders.
@@ -36,11 +36,11 @@ Relevant browser/WebGL, options, startup-copy, Pin, Surface-menu and native-cont
 
 ## Downloads / 下载
 
-- `CodeCodex-0.5.20-x64-setup.exe`
-- `CodeCodex-0.5.20-x64.msi`
-- `CodeCodex-0.5.20-x64.zip`
+- `CodeCodex-0.5.21-x64-setup.exe`
+- `CodeCodex-0.5.21-x64.msi`
+- `CodeCodex-0.5.21-x64.zip`
 - `Uninstall-CodeCodex.exe`
-- `CodeCodex-plugin-catalog-0.5.20.json`
+- `CodeCodex-plugin-catalog-0.5.21.json`
 - `SHA256SUMS.txt`
 
 插件依据 catalog 中各自的精确 tag 下载。v0.5.15、v0.5.18、v0.5.19 的兼容资源预发布仅补齐这些固定地址，不包含完整软件安装包，也不是额外软件更新。GitHub 自动生成的 Source code 归档与上述六项手动上传附件分开。
