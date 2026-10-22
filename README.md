@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.5.7-blue"></a>
+  <a href="https://github.com/Rice-dog/code-codex/releases"><img alt="版本" src="https://img.shields.io/badge/version-0.5.20-blue"></a>
   <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="支持 Windows 10 x64" src="https://img.shields.io/badge/platform-Windows%2010%2B%20x64-0078D4?logo=windows&logoColor=white">
   <img alt="Node" src="https://img.shields.io/badge/node-%3E%3D20-brightgreen">
@@ -28,28 +28,29 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 
 ![带语法高亮的 Code-Codex 代码预览](docs/screenshots/code-preview.png)
 
-当前版本 **v0.5.7** 汇总自 v0.4.52 以来的改进：全局中英文设置、Custom Background 图片/视频库、账号切换后的文件树恢复、共享背景透明度、安装卸载向导与诊断细分，以及应用/插件/原生服务的职责拆分。插件按独立版本发布，下载地址不随应用版本推算；匹配缓存可继续使用。完整更新内容与验证边界见 [v0.5.7 发布说明](releases/README.md)。
+当前版本 **v0.5.20** 汇总自 v0.5.7 以来的改进：ASCII Tiles Background 字符玻璃砖、统一且各有特色的26款插件图标、按分类保存的插件置顶、ASCII/自定义图片视频启动动画来源，以及顶部菜单栏透明度区域修复。插件使用独立版本和精确发布地址，匹配缓存可继续复用。完整累计更新与验证边界见 [发布说明](releases/README.md)。
 
 有新版可升级时，版本号右侧显示低调的绿色小箭头；已是最新版时不显示箭头。
 
-> 本地开发候选 **v0.5.9** 包含独立图形、统一描边的26款市场图标，并新增 **ASCII Tiles Background**：字符玻璃砖、连续拖动/点击波纹、分组参数重置及公共透明底板。候选目录共26个插件（Appearance15）；现有25个公开插件的版本和下载地址保持。新插件资源尚未公开，需要校验后的本地候选导入；当前公开软件版本仍是v0.5.7。
+
+
 
 ## 安装方式一：直接下载 EXE
 
-推荐从 [GitHub Release v0.5.7](https://github.com/Rice-dog/code-codex/releases/tag/v0.5.7) 下载安装包；[`releases`](releases/) 保留对应构建资产：
+推荐从 [GitHub Release v0.5.20](https://github.com/Rice-dog/code-codex/releases/tag/v0.5.20) 下载安装包；[`releases`](releases/) 保留对应构建资产：
 
 运行环境要求：Windows 10 版本 2004（build 19041）或更高版本、x64，
 并已安装官方稳定版 Codex/ChatGPT Desktop。
 
-- 推荐：`CodeCodex-0.5.7-x64-setup.exe`
-- 备选：`CodeCodex-0.5.7-x64.msi`
-- 便携包：`CodeCodex-0.5.7-x64.zip`
+- 推荐：`CodeCodex-0.5.20-x64-setup.exe`
+- 备选：`CodeCodex-0.5.20-x64.msi`
+- 便携包：`CodeCodex-0.5.20-x64.zip`
 - 独立卸载程序：`Uninstall-CodeCodex.exe`
 
 可以用下面的命令校验下载文件：
 
 ```powershell
-Get-FileHash .\CodeCodex-0.5.7-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\CodeCodex-0.5.20-x64-setup.exe -Algorithm SHA256
 ```
 
 然后和 [`SHA256SUMS.txt`](releases/SHA256SUMS.txt) 中的值对比。
@@ -63,7 +64,7 @@ Get-FileHash .\CodeCodex-0.5.7-x64-setup.exe -Algorithm SHA256
 
 ### 集中目录与自定义安装
 
-EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整体窗口宽高比为3∶1.8，按实际屏幕 DPI 绘制文字和按钮，品牌图保持比例：Welcome → License Agreement → Installation Folder → Installing → Finish。阅读并同意 MIT 协议后，进入目录页；勾选 Custom installation 展开地址栏，点击 Install 后在同一窗口连续安装，成功后点击 Finish 关闭。默认 `%LOCALAPPDATA%\Programs\Code-Codex`，也可选择其他固定本地盘中的专用文件夹。已安装时更新沿用该目录；本版及以后版本的应用内自动更新在同一品牌窗口直接显示 Installing → Finish，跳过欢迎、协议和目录页。旧公开版 v0.4.4 首次升级到本版会显示完整向导，沿用原目录；这是预期兼容流程，尚未实际执行该旧版升级测试。需要搬迁时先普通卸载保留数据，再安装到新目录，安装器会复制保留的数据并保留原来源。MSI 可使用 `msiexec /i CodeCodex-0.5.7-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"` 指定目录。
+EXE 使用紧凑白色品牌向导：客户区宽度保持720逻辑像素，整体窗口宽高比为3∶1.8，按实际屏幕 DPI 绘制文字和按钮，品牌图保持比例：Welcome → License Agreement → Installation Folder → Installing → Finish。阅读并同意 MIT 协议后，进入目录页；勾选 Custom installation 展开地址栏，点击 Install 后在同一窗口连续安装，成功后点击 Finish 关闭。默认 `%LOCALAPPDATA%\Programs\Code-Codex`，也可选择其他固定本地盘中的专用文件夹。已安装时更新沿用该目录；本版及以后版本的应用内自动更新在同一品牌窗口直接显示 Installing → Finish，跳过欢迎、协议和目录页。旧公开版 v0.4.4 首次升级到本版会显示完整向导，沿用原目录；这是预期兼容流程，尚未实际执行该旧版升级测试。需要搬迁时先普通卸载保留数据，再安装到新目录，安装器会复制保留的数据并保留原来源。MSI 可使用 `msiexec /i CodeCodex-0.5.20-x64.msi INSTALLFOLDER="D:\Apps\Code-Codex"` 指定目录。
 
 - `versions/`：不可变程序版本；`integration/`：快捷方式与安装事务。
 - `data/`：文件树设置、插件参数与用户图片/视频；官方 Codex 账号、聊天、项目文件仍由官方客户端管理。
@@ -105,7 +106,7 @@ EXE 成功安装后保留当前版本与实际上一版，安全清理更旧的�
 生成可下载的 setup EXE、MSI 和 ZIP：
 
 ```powershell
-./scripts/package.ps1 -Version 0.5.7
+./scripts/package.ps1 -Version 0.5.20
 ```
 
 生成结果会写入 `releases/`。
@@ -300,3 +301,5 @@ releases/              已生成的可下载安装包
 开发时，UI组合位于 `packages/explorer-ui/src/app/`，类型合同、基础生命周期、领域控制器、插件宿主和公共组件分别位于 `contracts/`、`core/`、`features/`、`plugin-host/`、`components/`。根入口兼容导出不承载新功能。独立插件按 `resources/plugin-definitions.json` 和分发锁复用校验过的资产；应用升版不自动改变插件独立版本/tag。实际插件源码变化需显式重建并审核字节身份。
 
 结构检查：`node scripts/check-architecture.mjs`；合同测试：`node --test scripts/test-refactor-contracts.mjs scripts/test-plugin-publication.mjs`；原生测试：`cargo test --workspace --locked`。生成 worker 后运行 `node scripts/generate-installer.mjs` 和 `scripts/check-worker-protocol.ps1`；生成文件应通过源模板修改。
+
+启动动画的插件来源新增 ASCII Tiles Background 与 Custom Background，后者只读当前选中图片/视频及参数。市场卡片右上角支持分类内置顶，按置顶先后排序并保存。Pin图形采用50%不透明度；新资源按catalog中的精确tag发布。

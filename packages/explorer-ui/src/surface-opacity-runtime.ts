@@ -9,7 +9,7 @@ export const MASK_REGIONS = [
   {key:"tree", zh:"文件树", en:"File tree", value:68},
   {key:"conversation", zh:"对话区", en:"Conversation", value:58},
   {key:"preview", zh:"文件预览区", en:"File preview", value:58},
-  {key:"tabs", zh:"顶部标签栏", en:"Tab bar", value:78},
+  {key:"tabs", zh:"顶部菜单栏", en:"Top menu bar", value:78},
   {key:"composer", zh:"消息输入框", en:"Message composer", value:86},
   {key:"utility", zh:"右侧工具栏", en:"Side panel", value:66},
   {key:"login", zh:"登录页", en:"Sign-in page", value:58},
@@ -164,7 +164,15 @@ html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-sh
 html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]):has(> [data-code-codex-owned][data-clipped-layout="true"]) { background-size:100% calc(100% - 42px) !important; }
 html[data-code-codex-ui-mask-active] body :is(main.main-surface,main[data-app-shell-main-surface="default"]):has(> [data-code-codex-owned][data-file-active]) { --code-codex-mask-content:var(--code-codex-mask-preview); }
 html[data-code-codex-ui-mask-active] body aside[data-app-shell-focus-area="right-panel"] { background-color:rgba(16,17,20,var(--code-codex-mask-utility)) !important; }
-html[data-code-codex-ui-mask-active] body :is([data-app-shell-titlebar="true"],[data-app-shell-header-edge-scroll]) { background-color:rgba(24,25,28,var(--code-codex-mask-tabs)) !important; }
+/* The tabs key is retained for the top application menu row.
+ * Match the same native role/trigger IDs used by application-menu.ts, without
+ * a CSS module hash or a localized label. Its parent also contains navigation
+ * and Code-Codex: paint that common row once, not the conversation titlebar,
+ * file tabs, or the full viewport carrying header-edge-scroll metadata. */
+html[data-code-codex-ui-mask-active] body :has(> [role="menubar"] > button[id^="application-menu-trigger-"][id$="-menu"]) {
+  background-color:rgba(24,25,28,var(--code-codex-mask-tabs)) !important;
+  background-image:none !important;
+}
 /* Current native composers paint the layout surface (the Home variant paints
  * its body). Set that surface, rather than stacking a second mask on its root. */
 html[data-code-codex-ui-mask-active] body [data-composer-layout] { --composer-layout-surface-background:rgba(30,31,35,var(--code-codex-mask-composer)) !important; }
@@ -191,5 +199,4 @@ export const SURFACE_OPACITY_TREE_CSS = `
 
 export const SURFACE_OPACITY_PREVIEW_CSS = `
 :host-context(html[data-code-codex-ui-mask-active]) :is(.tab-strip,.tab-slot,.tab-slot.active,.preview-tab[aria-selected="true"]) {background-color:transparent !important;}
-:host-context(html[data-code-codex-ui-mask-active]) .tab-strip.tab-strip {background-color:rgba(24,25,28,var(--code-codex-mask-tabs)) !important;}
 `;

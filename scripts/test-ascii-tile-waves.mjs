@@ -2,6 +2,33 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWaveGrid, gridPoint, kickWave, strokeWave, advanceWaves, clearWaves } from '../packages/explorer-ui/src/effects/ascii-tiles/tile-waves.mjs';
 
+test('CSS contact disk presses touched bricks, without an expanded Gaussian footprint', () => {
+  for (const [width,height,radius,density,shear] of [[1707,1019,58,6,-.31],[390,844,20,1,.5],[3840,2160,20,12,-.5],[1707,1019,400,7.8,-.31]]) {
+    const g=createWaveGrid(width,height,density,shear),x=width*.5,y=height*.5;
+    kickWave(g,x,y,-14,radius);
+    const [gx,gy]=gridPoint(width,height,density,shear,x,y);
+    const pitch=Math.max(width,height)/(density*Math.sqrt(1+shear*shear));let hit=0;
+    for(let iy=0;iy<g.rows;iy++)for(let ix=0;ix<g.columns;ix++){
+      if(!g.velocities[iy*g.columns+ix])continue;hit++;
+      const dx=Math.max(Math.abs(g.originX+ix+.5-gx)-.5,0)*pitch;
+      const dy=Math.max(Math.abs(g.originY+iy+.5-gy)-.5,0)*pitch;
+      assert.ok(Math.hypot(dx,dy)<=radius+1e-5);
+    }
+    assert.ok(hit>0);
+    const i=(Math.floor(gy)-g.originY)*g.columns+Math.floor(gx)-g.originX;
+    assert.equal(g.velocities[i],-14,'A small contact still presses its owning brick');
+  }
+});
+
+test('brick contacts remain additive, propagate, and fully recover', () => {
+  const g=createWaveGrid(1707,1019,7.8,-.31);
+  strokeWave(g,790,510,940,510,.12,58,.7);
+  step(g,.1,3.5,1);const before=g.heights.slice();
+  kickWave(g,940,510,-8,58);assert.deepEqual(g.heights,before);
+  assert.ok(g.active&&g.data.every(Number.isFinite));
+  step(g,1.1,3.5,1);assert.equal(g.active,false);assert.ok(g.data.every(v=>v===0));
+});
+
 const setup = () => createWaveGrid(1200, 800, 6, -0.22);
 const step = (g, time, speed = 5.5, duration = 1.8) => { for (let t = 0; t < time; t += 1 / 120) advanceWaves(g, 1 / 120, speed, duration); };
 

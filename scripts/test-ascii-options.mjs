@@ -6,7 +6,7 @@ test('defaults are stable and fresh objects are returned', () => {
   const options = normalizeOptions();
   assert.deepEqual(options, DEFAULTS);
   options.speed = 2;
-  assert.equal(DEFAULTS.speed, 1);
+  assert.equal(DEFAULTS.speed, 0.87);
 });
 test('all numeric controls clamp safely at both extremes', () => {
   for (const [key, [min, max]] of Object.entries(RANGES)) {
@@ -24,7 +24,7 @@ test('speed zero is preserved; invalid colors never reach uniforms', () => {
 });
 
 test('tile spacing and outlines have useful defaults and can be disabled', () => {
-  assert.equal(DEFAULTS.tileGap, 12);
+  assert.equal(DEFAULTS.tileGap, 18.5);
   assert.equal(DEFAULTS.recessColor, '#000000');
   assert.ok(DEFAULTS.outlineWidth > 0);
   assert.ok(DEFAULTS.outlineStrength > 0);

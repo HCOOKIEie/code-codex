@@ -1,4 +1,5 @@
 import { applyPluginCardIcons } from '../components/plugin-icons';
+import {attachPluginPins} from '../components/plugin-pins';
 import {AsciiTilesSettingsController,asciiTilesCardMarkup,asciiTilesPanelMarkup} from '../features/plugin-settings/ascii-tiles';
 import {getAsciiTilesBackgroundController} from '../plugin-host/backgrounds/ascii-tiles';
 import {ASCII_TILES_BACKGROUND_PLUGIN_ID} from '../effects/ascii-tiles/model';
@@ -461,6 +462,7 @@ export class CodeCodexElement extends HTMLElement {
     readonly #blackHoleSettingsTrigger: HTMLButtonElement;
     readonly #blackHoleSettingsCloseButton: HTMLButtonElement;
     #languageCleanup: (() => void) | undefined;
+    #pinCleanup: (()=>void) | undefined;
     #languageSubscription: (() => void) | undefined;
     readonly #blackHoleNumericControls = new Map<BlackHoleNumericSettingKey, Readonly<{
         definition: BlackHoleNumericControlDefinition;
@@ -834,6 +836,7 @@ export class CodeCodexElement extends HTMLElement {
         this.#settings = this.#readLocalSettings();
         this.#backgroundSettingsLanguage = parameterLanguage();
         this.#languageCleanup = localizeOwnedUi(this.#shadow);
+        this.#pinCleanup = attachPluginPins(this.#shadow);
         this.#languageSubscription = subscribeLanguage(() => this.#applyGlobalLanguage(parameterLanguage()));
         this.#syncBackgroundSettingsLanguagePresentation();
         for (const previewer of this.#readEnabledPreviewers())
@@ -1122,6 +1125,7 @@ export class CodeCodexElement extends HTMLElement {
         this.#customBackground?.dispose();
         this.#customBackground = undefined;
         this.#languageCleanup?.();
+        this.#pinCleanup?.();this.#pinCleanup=undefined;
         this.#languageCleanup = undefined;
         this.#languageSubscription?.();
         this.#languageSubscription = undefined;

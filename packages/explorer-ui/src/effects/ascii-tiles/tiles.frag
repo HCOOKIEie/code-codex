@@ -13,6 +13,7 @@ uniform float uRefraction, uChromatic, uSpecularExp, uSpecularStrength;
 uniform vec3 uFrequency;
 uniform vec2 uPointer;
 uniform float uReducedHover, uRadius, uIntensity, uOpacity;
+uniform float uIntroProgress, uIntroStrength;
 in vec2 vUV;
 out vec4 outColor;
 
@@ -51,6 +52,9 @@ void main() {
   vec2 latticePoint = lattice * p * uTileDensity + vec2(0.42, 0.35);
   ivec2 brickID = ivec2(floor(latticePoint));
   vec4 wave = brickWave(brickID);
+  // Subpixel spring tails must not shimmer the distant character grid. Keep
+  // the physical spring state continuous; fade only its rendered displacement.
+  wave *= smoothstep(0.04, 0.12, abs(wave.x));
   vec2 restQ = fract(latticePoint);
   vec2 restDistances = 0.5 - abs(restQ - 0.5);
   float restNearest = min(restDistances.x, restDistances.y);
@@ -60,15 +64,10 @@ void main() {
   float seam = min(uTileGap * 0.5 * pixelToTile, 0.44);
   float aa = max(fwidth(restNearest) * 0.5, 0.00001);
   float rim = max(min(uBevelWidth + uBevelSoftness * 0.25, 0.48 - seam), 0.001);
-  // Outer frames and black gaps are anchors; the raised face moves INSIDE them.
+  // The frame has ONE stationary bevel/outline, not a second shifted wire grid.
+  // The face inside it retains the original spring-driven press and rebound.
   float tile = uTileGap > 0.0 ? smoothstep(seam - aa, seam + aa, restNearest) : 1.0;
-  float pitch = 1.0 / pixelToTile;
-  float lift = clamp(wave.x, -1.5, 1.5) * min(uWaveHeight, pitch * 0.12);
-  float faceBlend = smoothstep(seam, seam + rim * 0.8, restNearest);
-  vec2 faceShift = vec2(0.22, 0.7) * lift;
-  vec2 shiftInGrid = lattice * faceShift * uTileDensity / edge;
-  float faceScale = clamp(1.0 + lift / pitch * 0.65, 0.85, 1.15);
-  vec2 q = 0.5 + (restQ - 0.5 - shiftInGrid * faceBlend) / mix(1.0, faceScale, faceBlend);
+  vec2 q = restQ;
   vec2 signedEdge = q - 0.5;
   vec2 distances = 0.5 - abs(signedEdge);
   float nearest = min(distances.x, distances.y);
@@ -76,8 +75,28 @@ void main() {
   vec2 gradient = distances.x < distances.y ? vec2(sign(signedEdge.x), 0.0) : vec2(0.0, sign(signedEdge.y));
   gradient = transpose(lattice) * gradient;
   vec2 offset = gradient * slope * uRefraction;
+  float pitch = 1.0 / pixelToTile;
   vec2 centerGrid = (vec2(brickID) + 0.5 - vec2(0.42, 0.35)) / uTileDensity;
   vec2 centerPixel = uResolution * 0.5 + inverse(lattice) * centerGrid * edge;
+  float entrance = 1.0;
+  float entranceLift = 0.0;
+  float entranceLight = 0.0;
+  if (uIntroProgress < 1.0) {
+    // Tile-sized phases: a diagonal cascade with small, stable timing offsets.
+    float seed = fract(sin(dot(vec2(brickID), vec2(127.1, 311.7))) * 43758.5453);
+    float order = dot(clamp(centerPixel / uResolution, 0.0, 1.0), vec2(0.48, 0.52));
+    float delay = order * 0.46 + seed * 0.12;
+    float local = clamp((uIntroProgress - delay) / 0.42, 0.0, 1.0);
+    entrance = smoothstep(0.0, 0.36, local);
+    float settle = (1.0 - local) * (1.0 - local);
+    entranceLift = cos(local * 8.0) * settle * min(pitch * 0.22, 80.0) * uIntroStrength;
+    entranceLight = sin(local * 3.14159265) * settle * uIntroStrength;
+  }
+  float lift = clamp(wave.x, -1.5, 1.5) * min(uWaveHeight, pitch * 0.12);
+  lift += entranceLift;
+  float faceBlend = smoothstep(seam, seam + rim * 0.8, restNearest);
+  vec2 faceShift = vec2(0.22, 0.7) * lift;
+  float faceScale = clamp(1.0 + lift / pitch * 0.65, 0.85, 1.15);
   vec2 refracted = centerPixel + (pixel - centerPixel - faceShift * faceBlend)
     / mix(1.0, faceScale, faceBlend) + offset;
   float r = ascii(refracted + offset * uChromatic);
@@ -94,10 +113,12 @@ void main() {
   // Glass catches white light on the upper bevel while glyphs retain dispersion.
   glyphs += vec3(highlight * uSpecularStrength) * (0.08 + vec3(r,g,b) * 0.92);
   glyphs += vec3(r,g,b) * rimReflection * uSpecularStrength * 4.5;
-  float energy = clamp(abs(wave.x) + abs(wave.w) * 0.02, 0.0, 1.5);
+  float energy = clamp((abs(wave.x) + abs(wave.w) * 0.02) * uWaveHeight / 36.0, 0.0, 0.35);
   // Reduced motion retains a static material cue instead of a moving wave.
   energy += uReducedHover * uIntensity * 0.18 * (1.0 - smoothstep(0.0, uRadius, length(pixel - uPointer)));
-  glyphs *= 1.0 + energy * (0.45 + slope * 0.35) + clamp(wave.x, -1.0, 1.0) * 0.08;
+  // Geometric pressing supplies interaction; never add a dark cursor veil.
+  glyphs *= 1.0 + energy * slope * 0.12;
+  glyphs *= 1.0 + entranceLight * (0.4 + slope * 0.8);
   vec3 color = mix(uRecessColor, mix(uBackgroundColor, glyphs, clamp(max(max(r,g),b) * 3.0,0.0,1.0)), tile);
   if (uOutlineWidth > 0.0 && uOutlineStrength > 0.0) {
     // Material transition at the INSIDE of the bevel, not a painted line.
@@ -111,5 +132,6 @@ void main() {
     color *= 1.0 - shadow * uOutlineStrength * tile * 0.22;
     color *= 1.0 + lip * uOutlineStrength * tile * (facing * 0.28 - 0.08);
   }
+  color = mix(uBackgroundColor, color, entrance);
   outColor = vec4(clamp(color, 0.0, 1.0), uOpacity);
 }

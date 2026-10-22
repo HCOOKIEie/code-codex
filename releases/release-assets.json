@@ -1,27 +1,27 @@
 [
   {
-    "assetName": "CodeCodex-0.5.9-x64-setup.exe",
-    "path": "CodeCodex-0.5.9-x64-setup.exe",
-    "size": 15862380,
-    "sha256": "746fa0472a3fc7777c651f079253cdac9fe514580e628300bfe9a079fab26d5c"
+    "assetName": "CodeCodex-0.5.20-x64-setup.exe",
+    "path": "CodeCodex-0.5.20-x64-setup.exe",
+    "size": 15862867,
+    "sha256": "a0fed5a4c2eb74be5c8ca2016ce3b2de9314c52931803e512413b726f395eb39"
   },
   {
-    "assetName": "CodeCodex-0.5.9-x64.msi",
-    "path": "CodeCodex-0.5.9-x64.msi",
-    "size": 10919936,
-    "sha256": "47aab92c270c2b30bc0cf9046d4e779f4f0aebf418758d72fd88a55379556f03"
+    "assetName": "CodeCodex-0.5.20-x64.msi",
+    "path": "CodeCodex-0.5.20-x64.msi",
+    "size": 10915840,
+    "sha256": "02d24bdc013db7dd668cc7dd1171585884a37ab43a24d5574b903bb6ccfbb145"
   },
   {
-    "assetName": "CodeCodex-0.5.9-x64.zip",
-    "path": "CodeCodex-0.5.9-x64.zip",
-    "size": 13103188,
-    "sha256": "d19a934cc3dba880f79eee289e9b947b3715de4d985411b03c09776c21a4573a"
+    "assetName": "CodeCodex-0.5.20-x64.zip",
+    "path": "CodeCodex-0.5.20-x64.zip",
+    "size": 13103163,
+    "sha256": "0b424011b385702fa5dd012c1aa0d0edc0df91d7a2d7e4e56e4d6e08f405e993"
   },
   {
     "assetName": "Uninstall-CodeCodex.exe",
     "path": "Uninstall-CodeCodex.exe",
     "size": 2692096,
-    "sha256": "61e54cbd488ec3feb0f8bdff34a77f06a29f289328fc8b8b0a60c73af05d6dbe"
+    "sha256": "efb60e784a58a9f2b52c8dfb255374ebc8d537d122a536512149559dc0552d5b"
   },
   {
     "releaseTag": "v0.3.96",
@@ -199,18 +199,18 @@
     "sha256": "576ce8fc720678c7ee94bae8d562075e4a725c8991b222f8c6c062201d913d89"
   },
   {
-    "releaseTag": "plugin-assets-2026-10-18",
-    "assetName": "CodeCodex-background-custom-background-1.0.9.js",
-    "path": "plugins/appearance/custom-background/CodeCodex-background-custom-background-1.0.9.js",
-    "size": 29192,
-    "sha256": "46250603889b6dc143239d9aa943bfa7adcd79b0b32fceac9a57b79262083183"
+    "releaseTag": "v0.5.19",
+    "assetName": "CodeCodex-background-custom-background-1.0.10.js",
+    "path": "plugins/appearance/custom-background/CodeCodex-background-custom-background-1.0.10.js",
+    "size": 31263,
+    "sha256": "792a71fa6d89d1a4b5aae1c1bb6baa36f009bf35f43855cee61d1e6792104c1e"
   },
   {
-    "releaseTag": "plugin-assets-2026-10-18",
-    "assetName": "CodeCodex-plugin-surface-opacity-1.0.3.js",
-    "path": "plugins/appearance/surface-opacity/CodeCodex-plugin-surface-opacity-1.0.3.js",
-    "size": 12484,
-    "sha256": "3c0fd562b05ab9af6451cf6e7de0d7d5f8095ce78761650a0a8c4392832c54ab"
+    "releaseTag": "v0.5.18",
+    "assetName": "CodeCodex-plugin-surface-opacity-1.0.6.js",
+    "path": "plugins/appearance/surface-opacity/CodeCodex-plugin-surface-opacity-1.0.6.js",
+    "size": 12760,
+    "sha256": "8b2b40a290c14eea2a69edb617908621a85e2c9dd028998ebea0ac2b149b833f"
   },
   {
     "releaseTag": "v0.3.96",
@@ -227,11 +227,11 @@
     "sha256": "1fcdf42d099e7159e1cf07517882c6b21ba7e99aa23be9c3c9e0a8fed6ffe77e"
   },
   {
-    "releaseTag": "plugin-assets-2026-10-18",
-    "assetName": "CodeCodex-plugin-codex-startup-transition-1.1.26.js",
-    "path": "plugins/appearance/codex-startup-transition/CodeCodex-plugin-codex-startup-transition-1.1.26.js",
-    "size": 38198,
-    "sha256": "0e9a4689d037e93fca94fcff6e981187a8bec80a9ddd511b459a52ca151e58e0"
+    "releaseTag": "v0.5.19",
+    "assetName": "CodeCodex-plugin-codex-startup-transition-1.1.27.js",
+    "path": "plugins/appearance/codex-startup-transition/CodeCodex-plugin-codex-startup-transition-1.1.27.js",
+    "size": 38281,
+    "sha256": "15c117ceba380815d38928d76c7e40f08c19f952cca37605d4c56b0d7740af82"
   },
   {
     "releaseTag": "v0.3.96",
@@ -318,16 +318,16 @@
     "sha256": "c14d7637b296134c4a9b6e63e8947ed57745f0bacb40dc5cb6fad2cf175644d2"
   },
   {
-    "releaseTag": "v0.5.8",
-    "assetName": "CodeCodex-background-ascii-tiles-1.0.0.js",
-    "path": "plugins/appearance/ascii-tiles/CodeCodex-background-ascii-tiles-1.0.0.js",
-    "size": 24026,
-    "sha256": "122f0970f71fcbba38dbe9bc0c0a3615bcf5f57f01a8d6da229654dc40520764"
+    "releaseTag": "v0.5.15",
+    "assetName": "CodeCodex-background-ascii-tiles-1.0.7.js",
+    "path": "plugins/appearance/ascii-tiles/CodeCodex-background-ascii-tiles-1.0.7.js",
+    "size": 25486,
+    "sha256": "0fb2418cb92a1cf81724f10034881dcafae0e0d6de01d6ef620d1db47869d8da"
   },
   {
-    "assetName": "CodeCodex-plugin-catalog-0.5.9.json",
+    "assetName": "CodeCodex-plugin-catalog-0.5.20.json",
     "path": "plugins/catalog.json",
-    "size": 27018,
-    "sha256": "e3c978969da3dd7ba03db52d09dc71ac90b4e4fac31415cebce5b14e023ccc9b"
+    "size": 27005,
+    "sha256": "bcd02cb46d0266add87015d33e724e7d314a78cd6ea00a64842870264f5566cc"
   }
 ]

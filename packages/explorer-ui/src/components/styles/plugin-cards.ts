@@ -11,6 +11,13 @@ export const style5 = String.raw`  .preview-extension {
     border-radius: 8px;
   }
   .preview-extension[hidden] { display: none !important; }
+  .preview-extension { position:relative; }
+  .preview-extension-copy { padding-inline-end:22px; }
+  .plugin-pin { position:absolute;inset-block-start:5px;inset-inline-end:5px;width:22px;height:22px;padding:4px;display:grid;place-items:center;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--cle-muted);cursor:pointer; }
+  .plugin-pin svg { width:14px;height:14px;opacity:.5;fill:none;stroke:currentColor;stroke-width:1.15;stroke-linecap:round;stroke-linejoin:round;pointer-events:none; }
+  .plugin-pin:hover,.plugin-pin:focus-visible { background:var(--cle-subtle);border-color:var(--cle-rule); }
+  .plugin-pin:focus-visible { outline:2px solid var(--cle-icon-blue);outline-offset:1px; }
+  .plugin-pin[aria-pressed="true"] { color:var(--cle-icon-blue);background:color-mix(in srgb,var(--cle-icon-blue) 10%,var(--cle-paper)); }
   .preview-extension[data-package-pending="true"] .preview-extension-copy {
     display: flex;
     flex-direction: column;

@@ -1,50 +1,48 @@
-# Code-Codex v0.5.7
+# Code-Codex v0.5.20
 
-本次软件更新范围为上一正式 Release **v0.4.52 → v0.5.7**，包含期间全部已保留功能与最终修复。独立插件资源 Release 不计为软件更新基准。
+本次正式软件更新覆盖 **v0.5.7 → v0.5.20** 的完整保留变更；期间的本地版本及插件兼容资源发布不另算软件更新。
 
 ## 简体中文
 
-- **全局语言**：安装欢迎页按系统语言预选中文或英文；安装后可在 Code-Codex → 语言子菜单切换。普通界面、右键菜单及插件参数跟随全局设置，插件名称保留英文，技术错误与诊断日志使用英文。
-- **Custom Background**：新增本地图片/视频素材库与逐素材位置、缩放、旋转、透明度和外观调节，参数区提供 Reset。卡片、素材库和设置面板遵循共用样式；与 UI Surface Opacity 共存。打开设置保留素材库及背景节点，视频预览跟随当前背景进度。
-- **背景透明度**：统一树、文件预览与背景表面规则，补齐自定义背景下的文件预览、官方设置和次级面板底板。对话顶部/底部遮罩共用现有对话区透明度，不增加重复滑块；保留文档内容必要底色和文字可读性。
-- **账号切换与启动**：改进登录/退出或页面重载后的 renderer/Bridge 监督、重连与恢复；细分启动、CDP、进程身份、存储、网络与安装阶段的诊断，保留原始异常及恢复证据。继续保持受限本地操作和进程资格校验。
-- **安装与卸载**：中英文品牌向导、带版本号的根启动器、默认尝试热激活；普通卸载保留设置/素材/插件，Purge 清理受管数据和图标。卸载 EXE 与 worker 不再继承安装根工作目录，修复文件已清除却因根目录占用持续报错；真实剩余文件仍报错，并保留首次及末次原因。第三方仅占着已清空的目录时记录具体诊断，允许保留可重装的空目录。
-- **插件下载与维护**：25 个插件采用独立版本、显式发布 tag、资源闭包与大小/SHA 校验。未改插件不随应用升级更换地址或要求重下；修正缺资源插件的分发位置，复用已有公开媒体。应用、功能控制器、公共生命周期、原生服务、预览实现、语言域和安装脚本拆分为有明确职责的模块，增加边界与回归检查。
+- **ASCII Tiles Background（字符玻璃砖）**：新增 WebGL2 背景、字符与玻璃砖外观参数、鼠标按压和回弹、邻砖传播及分组重置。修正交互时整屏淡网格游动、反向回弹和鼠标附近暗影；保留砖面按压效果。加入从网页版移植的对角线逐砖开场动画，打开参数面板不重播背景。
+- **统一且各有特色的插件图标**：26 款插件使用不同功能图形，共享描边、尺寸及主题配色，不再重复使用眼睛占位。
+- **插件置顶**：每张卡片右上角新增 Pin。各分类内按置顶先后排列，取消后恢复原顺序，重开和升级保留选择；图形采用 50% 不透明度，保持低调且可辨认。
+- **启动动画来源**：选择“插件”时可用 ASCII Tiles Background 及 Custom Background 当前图片或视频。启动副本读取已保存参数，拥有独立播放/渲染和资源生命周期，不切换或重启正常背景；视频准备完成后保留播放速度。
+- **UI Surface Opacity**：将原“顶部标签栏”明确为“顶部菜单栏”，控制 File/Edit/View/Help/Code-Codex 所在整行。保留原调节值，修正调顶部反而改变对话标题/文件标签底色的区域误判。
+- **下载与缓存**：补齐本次更新涉及的精确插件资源，保留独立版本和固定下载地址规则。未改包继续复用匹配缓存；发生内容更新、缺失或损坏的包需要下载对应版本。技术错误和日志继续使用英文。
 
-### 升级与验证边界
+### 升级与验证范围
 
-EXE/ZIP 用户使用完整安装包覆盖原目录即可，保留设置、原素材和匹配缓存，无需先卸载。插件内容改变、缺失或损坏时仍需下载对应包。MSI 所有权安装不接受在线 standalone EXE 覆盖，请使用 MSI/Windows Installer 路径；真实 MSI 升级事务与全部历史版本直升组合尚未完成验证。
+EXE/ZIP 用户可在原安装目录更新，保留设置、原素材及匹配的插件缓存，不需要先卸载。MSI 所有权安装继续使用 MSI/Windows Installer 路径。安装会尝试即时激活；没有可信调试端口的官方会话仍需通过 Code-Codex 启动器重新打开，程序不会自动关闭聊天。
 
-当前官方 Codex 若没有可信调试端口，文件安装成功后仍需从新版 Code-Codex 启动器重新打开；不会自动终止聊天。旧菜单无法使用时可手动下载完整 EXE。Windows 10 的相关分支有自动检查，但不等于在所有用户环境实测；本次没有真实 macOS 验收。
-
-已验证真实 Windows 安装目录内卸载 EXE 从确认到 Finish：退出码 0、安装根完全删除、临时卸载进程/目录清理，并重新安装及确认 v0.5.6 可见文件树 ready。故障注入、浏览器与原生测试和插件公开下载完整性另有检查；不将 fixture 当全部物理环境验证。
+已执行相关浏览器/WebGL、参数、启动副本、Pin、Surface 菜单和原生契约回归，并验证当前 Windows 的实际安装、文件校验及可见文件树 ready。部分安装的默认激活观察超过时限，显式重试后确认新版；超时不等于安装文件失败。完整 MSI 升级事务、所有历史版本直升、其它 GPU/Windows 环境及 macOS 尚未逐一实测，不将 fixture 当全平台保证。
 
 ## English
 
-This software release covers the complete retained changes from **v0.4.52 to v0.5.7**. Standalone plugin-resource releases are not the software comparison baseline.
+This software update covers all retained changes from **v0.5.7 to v0.5.20**. Intermediate local builds and compatibility-resource prereleases are not separate software updates.
 
-- **Global language:** Welcome preselects Chinese or English from the system language; switch later through Code-Codex → Language. Normal UI, context menus and plugin parameters follow the global setting. Plugin names remain English; technical errors and diagnostics remain English.
-- **Custom Background:** Adds a local image/video library, per-media transforms, opacity and appearance controls, with Reset in the parameter section. Cards, libraries and settings share established styles. It works with UI Surface Opacity; opening settings preserves the library/background nodes and synchronizes video preview to the current background timeline.
-- **Background transparency:** Shares file-tree, file-preview and background surface rules and covers Custom Background in file previews, official settings and secondary panels. Conversation edge masks share the existing Conversation opacity without duplicate sliders; required document content backgrounds and text readability are preserved.
-- **Account transitions and startup:** Improves renderer/Bridge supervision, reconnection and recovery across sign-in/out and page replacement. Diagnostics distinguish startup, CDP, process identity, storage, network and installation phases, preserving original exceptions and recovery evidence. Bounded local operations and process qualification remain enforced.
-- **Installation and removal:** Uses bilingual branded wizards, versioned root launchers and automatic attempts at live activation. Normal removal retains settings/media/plugins; Purge removes managed data and icons. The uninstall EXE and workers leave the installation working directory, fixing repeated root-lock failures after files were removed. Real remaining files still fail, with first and last causes preserved. A third-party handle on a verified empty folder produces a specific diagnostic and may leave a safe, reinstallable empty directory.
-- **Plugin delivery and maintenance:** All 25 plugins have independent versions, explicit release tags, complete resource closures and size/SHA verification. Unchanged packages keep their URLs and matching caches across application updates. Missing-plugin distribution locations are corrected while existing public media remain reusable. Application composition, feature controllers, shared lifecycle, native services, preview implementations, language domains and installer sources now have clearer module ownership and regression boundaries.
+- **ASCII Tiles Background:** Adds a WebGL2 background with glyph/glass controls, mouse pressing and rebound, neighboring-tile propagation and grouped resets. Fixes the faint screen-wide moving grid, reverse rebound and dark cursor veil while preserving the pressed glass-face effect. Ports the Web effect's diagonal tile entrance without replaying the background when its settings panel opens.
+- **Distinct, consistent plugin icons:** All26 plugins have individual functional artwork with shared outline weight, sizing and theme colors instead of repeated eye placeholders.
+- **Plugin pins:** Each card has a top-right Pin. Pinned cards appear first within their category in pin order; unpinning restores catalog order. Choices persist across reopening and upgrades. Glyphs use50% opacity for a quieter appearance.
+- **Startup animation sources:** Plugin mode can select ASCII Tiles Background or the currently selected Custom Background image/video. Startup copies read saved parameters and own independent playback/rendering and cleanup, without switching or restarting the normal background. Video playback speed is retained after preparation.
+- **UI Surface Opacity:** Renames the existing Tab bar control to Top menu bar and targets the complete File/Edit/View/Help/Code-Codex row. Saved values are retained; conversation titles and file tabs no longer receive this region's backing color.
+- **Downloads and caches:** Publishes the exact updated plugin resources while retaining independent package versions and explicitly pinned download addresses. Unchanged matching caches are reusable; changed, missing or corrupt packages require their corresponding version. Technical errors and logs remain English.
 
 ### Upgrade and validation limits
 
-EXE/ZIP users can install over the registered directory without uninstalling; settings, original media and verified matching caches are retained. Changed, missing or corrupt plugin contents still require the corresponding download. The online standalone EXE cannot overwrite an MSI-owned installation; use the MSI/Windows Installer path. A real MSI upgrade transaction and every historical direct-upgrade combination have not been validated.
+EXE/ZIP users can update in the existing installation directory without uninstalling; settings, original media and matching plugin caches are retained. MSI-owned installations must continue through MSI/Windows Installer. Installation attempts live activation. An official session without a verified debugging listener must still be reopened through the Code-Codex launcher; chats are not terminated automatically.
 
-An official Codex session without a verified debugging listener requires reopening through the new Code-Codex launcher after file installation; chats are not terminated automatically. Download the full EXE manually if an older menu is unavailable. Automated Windows 10 branch checks do not prove every user's environment, and no real macOS acceptance is claimed.
-
-The actual installed Windows uninstaller was exercised from confirmation through Finish: exit code 0, complete installation-root deletion, staged-process/directory cleanup, reinstallation and a visible v0.5.6 ready tree. Fault-injection, browser/native regression and public plugin-integrity checks are separate evidence; fixtures do not establish coverage of every physical environment.
+Relevant browser/WebGL, options, startup-copy, Pin, Surface-menu and native-contract regressions were exercised, along with actual installation, file hashes and a visible ready tree on the current Windows machine. Some default activation observations timed out and were subsequently confirmed through an explicit retry; this is distinct from file-installation failure. Complete MSI upgrades, every historical direct upgrade, other GPU/Windows environments and macOS have not all been physically tested. Fixtures do not establish universal platform coverage.
 
 ## Downloads / 下载
 
-- `CodeCodex-0.5.7-x64-setup.exe`
-- `CodeCodex-0.5.7-x64.msi`
-- `CodeCodex-0.5.7-x64.zip`
+- `CodeCodex-0.5.20-x64-setup.exe`
+- `CodeCodex-0.5.20-x64.msi`
+- `CodeCodex-0.5.20-x64.zip`
 - `Uninstall-CodeCodex.exe`
-- `CodeCodex-plugin-catalog-0.5.7.json`
+- `CodeCodex-plugin-catalog-0.5.20.json`
 - `SHA256SUMS.txt`
 
-Plugin assets remain pinned by the catalog to their exact existing releases. Source-code archives generated by GitHub are separate from these six uploaded assets.
+插件依据 catalog 中各自的精确 tag 下载。v0.5.15、v0.5.18、v0.5.19 的兼容资源预发布仅补齐这些固定地址，不包含完整软件安装包，也不是额外软件更新。GitHub 自动生成的 Source code 归档与上述六项手动上传附件分开。
+
+Plugins download from their exact catalog tags. Compatibility-resource prereleases at v0.5.15, v0.5.18 and v0.5.19 only supply those fixed asset addresses, contain no software installer and are not additional software updates. GitHub's automatic Source code archives are separate from the six uploaded assets above.

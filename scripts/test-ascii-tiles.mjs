@@ -1,3 +1,5 @@
+import {measureAsciiInteraction} from './ascii-interaction-probe.mjs';
+import {DEFAULTS} from '../packages/explorer-ui/src/effects/ascii-tiles/options.mjs';
 import {assertCatalogMatchesDeclarations} from './plugin-catalog-contract.mjs';
 import {pluginAssetPath,verifiedPluginSources} from './plugin-package-files.mjs';
 import assert from 'node:assert/strict';
@@ -43,8 +45,21 @@ try{
  await e(`${button}.click()`);await wait(`${button}.textContent==='Enable'`,'verified download');
  await check('Download does not activate',`!document.querySelector('[data-code-codex-ascii-tiles-layer]')`);
  await e(`${button}.click()`);await wait(`document.querySelector('[data-code-codex-ascii-tiles-layer] canvas')&&${button}.getAttribute('aria-pressed')==='true'&&!${button}.disabled`,'enable terminates');
- await delay(300);await e(`window.asciiCanvas=document.querySelector('[data-code-codex-ascii-tiles-layer] canvas');window.asciiContext=asciiCanvas.getContext('webgl2');window.draws=0;window.originalDraw=asciiContext.drawArrays.bind(asciiContext);asciiContext.drawArrays=(...args)=>{draws++;originalDraw(...args);const p=new Uint8Array(256*256*4);asciiContext.readPixels(Math.floor(asciiContext.drawingBufferWidth/2)-128,Math.floor(asciiContext.drawingBufferHeight/2)-128,256,256,asciiContext.RGBA,asciiContext.UNSIGNED_BYTE,p);window.painted=p.some((v,i)=>i%4!==3&&v>0);window.drawError=asciiContext.getError();};`);
+ await check('Cold initialization uses all tuned defaults in actual controls',`(()=>{const expected=${JSON.stringify({...DEFAULTS,paused:false})},inputs=[...${s}.querySelectorAll('[data-ascii-control]')];return inputs.length===29&&inputs.every(i=>{const value=i.type==='checkbox'?i.checked:i.type==='color'?i.value:Number(i.value);return value===expected[i.dataset.asciiControl];});})()`);
+ await delay(300);await e(`window.asciiCanvas=document.querySelector('[data-code-codex-ascii-tiles-layer] canvas');window.asciiContext=asciiCanvas.getContext('webgl2');window.draws=0;window.originalDraw=asciiContext.drawArrays.bind(asciiContext);asciiContext.drawArrays=(...args)=>{draws++;originalDraw(...args);const p=new Uint8Array(256*256*4);asciiContext.readPixels(Math.floor(asciiContext.drawingBufferWidth/2)-128,Math.floor(asciiContext.drawingBufferHeight/2)-128,256,256,asciiContext.RGBA,asciiContext.UNSIGNED_BYTE,p);window.asciiPixels=p;window.painted=p.some((v,i)=>i%4!==3&&v>0);window.drawError=asciiContext.getError();};`);
  await delay(700);console.log('GPU snapshot',await e('({draws:window.draws,painted:window.painted,error:window.drawError,rect:asciiCanvas.getBoundingClientRect().toJSON(),hidden:document.hidden,errors:window.errors})'));await check('WebGL2 actively draws nonblack pixels',`draws>0&&window.painted&&window.drawError===0`);
+ await e(`window.setAsciiFixtureValue=(key,value)=>{const i=${s}.querySelector('[data-ascii-control="'+key+'"]');if(i.type==='checkbox')i.checked=value;else i.value=String(value);i.dispatchEvent(new Event('input',{bubbles:true}));};setAsciiFixtureValue('tileDensity',6);setAsciiFixtureValue('tileShear',-.31);setAsciiFixtureValue('tileGap',18.5);setAsciiFixtureValue('bevelWidth',.025);setAsciiFixtureValue('outlineStrength',.6);setAsciiFixtureValue('refractionStrength',46);setAsciiFixtureValue('specularExponent',256);setAsciiFixtureValue('patternFreqX',9.4);setAsciiFixtureValue('glyphColor','#ffffff');`);
+ await wait(`asciiCanvas.dataset.introProgress==='1.0000'`,'entrance completes before normal press check');
+ report.motion=await measureAsciiInteraction(browser);console.log('White glyph local interaction',report.motion);
+ report.checks.push({name:'White glyphs visibly deform locally, distant grid stays fixed and waves recover',actual:report.motion});
+ writeFileSync(resolve(output,'motion.json'),JSON.stringify(report.motion,null,2));
+ assert.ok(report.motion.active.changed/report.motion.active.pixels>.02,'At least2percent of the local white-glyph patch must visibly respond');
+ assert.ok(report.motion.active.introduced/report.motion.active.pixels>.005,'Local refraction must move visible glyph edges, not merely brighten already white pixels');
+ assert.equal(report.motion.active.farChanged,0,'Distant grid must remain anchored');
+ assert.ok(report.motion.active.farPainted>100,'Distant reference contains visible glyphs');
+ assert.ok(report.motion.active.minCenterBrightnessRatio>.9,'Local interaction must not create a broad dark shadow');
+ assert.ok(report.motion.active.frames>2&&report.motion.active.error===0&&report.motion.active.sameCanvas);
+ assert.equal(report.motion.recovered.changed,0,'Local field must fully recover after input ends');
  await e(`${card}.querySelector('.ascii-tiles-settings').click()`);await check('Panel anchored beside corresponding card',`(()=>{const panel=${s}.querySelector('.ascii-tiles-panel'),r=panel.getBoundingClientRect(),c=${card}.getBoundingClientRect();return panel.matches(':popover-open')&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&Math.abs(r.left-c.right-8)<2;})()`);
  await check('All original parameters and per-group Reset',`${s}.querySelectorAll('[data-ascii-control]').length===29&&${s}.querySelectorAll('[data-ascii-reset]').length===4`);
  await e(`${s}.querySelector('[data-ascii-control="waveHeight"]').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,composed:true}))`);
@@ -57,6 +72,8 @@ try{
  await check('Parameters persist without canvas replacement',`JSON.parse(localStorage.getItem('code-codex:ascii-tiles-background:v1')).waveHeight===57&&document.querySelector('[data-code-codex-ascii-tiles-layer] canvas')===asciiCanvas`);
  await e(`${s}.querySelector('[data-ascii-reset="0"]').click()`);await check('Group reset preserves unrelated parameters',`JSON.parse(localStorage.getItem('code-codex:ascii-tiles-background:v1')).waveHeight===57`);
  await e(`${s}.querySelector('[data-ascii-reset="3"]').click()`);await check('Interaction reset restores source default',`JSON.parse(localStorage.getItem('code-codex:ascii-tiles-background:v1')).waveHeight===36`);
+ await e(`for(const i of ${s}.querySelectorAll('[data-ascii-reset]'))i.click()`);
+ await check('All group resets restore the complete tuned defaults',`(()=>{const expected=${JSON.stringify({...DEFAULTS,paused:false})},actual=JSON.parse(localStorage.getItem('code-codex:ascii-tiles-background:v1'));return Object.entries(expected).every(([k,v])=>actual[k]===v);})()`);
  await e(`window.localeService=window[Symbol.for('code-codex:language-service:v1')];localeService.applyLanguage({schema:1,locale:'zh-CN',revision:100,source:'menu'})`);await delay(100);
  await check('Chinese labels/actions and English plugin name',`${button}.textContent==='停用'&&${s}.querySelector('[data-ascii-label="waveHeight"]').textContent==='波纹高度'&&${card}.querySelector('h4').textContent==='ASCII Tiles Background'`);
  await e(`localeService.applyLanguage({schema:1,locale:'en',revision:101,source:'menu'})`);await delay(100);

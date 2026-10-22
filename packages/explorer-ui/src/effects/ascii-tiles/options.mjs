@@ -1,11 +1,11 @@
 export const DEFAULTS = Object.freeze({
-  speed: 1, glyphSize: 8, tileDensity: 3.3, tileShear: -0.22,
-  tileGap: 12, outlineWidth: 1.25, outlineStrength: 0.45,
-  bevelWidth: 0.02, bevelSoftness: 0.1, refractionStrength: 100,
-  chromaticSpread: 0.2, specularExponent: 150, specularStrength: 1,
-  patternFreqX: 6, patternFreqY: 4, patternFreqXY: 10,
+  speed: 0.87, glyphSize: 9, tileDensity: 6.7, tileShear: -0.31,
+  tileGap: 18.5, outlineWidth: 1.25, outlineStrength: 0.6,
+  bevelWidth: 0.13, bevelSoftness: 0.1, refractionStrength: 46,
+  chromaticSpread: 0.66, specularExponent: 256, specularStrength: 1,
+  patternFreqX: 9.4, patternFreqY: 4, patternFreqXY: 10,
   glyphColor: "#ffffff", recessColor: "#000000", backgroundColor: "#000000",
-  opacity: 1, dpr: 1.5, cursorInteraction: true, cursorRadius: 160, cursorIntensity: 1, cursorRecovery: 1.8,
+  opacity: 0.6, dpr: 1.5, cursorInteraction: true, cursorRadius: 110, cursorIntensity: 1, cursorRecovery: 0.95,
   waveSpeed: 5.5, waveHeight: 36, clickStrength: 1.5,
 });
 

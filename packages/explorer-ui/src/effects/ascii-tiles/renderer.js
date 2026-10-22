@@ -49,7 +49,7 @@ function compile(gl, type, source) {
 }
 export class AsciiTilesRenderer {
   constructor(host,canvas,settings,onError=()=>{}) {
-    const latest={current:settings},update={current:null};
+    const latest={current:settings},update={current:null},replay={current:null};
     let initialError=null,initializing=true;
     const setError=message=>{if(message&&initializing)initialError=message; if(!initializing)onError(message??undefined);};
     this.dispose=(()=>{
@@ -57,7 +57,6 @@ export class AsciiTilesRenderer {
 
     const context = canvas.getContext("webgl2", { alpha: true, antialias: false, premultipliedAlpha: false, depth: false, stencil: false });
     if (!context) {
-      const message = "WebGL 2 \u4E0D\u53EF\u7528\uFF0C\u8BF7\u5F00\u542F\u6D4F\u89C8\u5668\u786C\u4EF6\u52A0\u901F / Enable browser hardware acceleration.";
       throw new Error("ASCII_WEBGL_UNAVAILABLE: WebGL 2 is required. Enable hardware acceleration and retry.");
     }
     const gl = context;
@@ -80,6 +79,9 @@ export class AsciiTilesRenderer {
     let lastWaveInput = 0;
     let uniforms = {};
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    // Port only the Web entrance. Keep persisted settings and normal motion intact.
+    let introProgress = motion.matches ? 1 : 0;
+    const introDuration = 2.4;
     const fail = (cause) => {
       const message = cause instanceof Error ? cause.message : String(cause);
       setError(message);
@@ -119,7 +121,8 @@ export class AsciiTilesRenderer {
         uRadius: options.cursorRadius,
         uIntensity: options.cursorIntensity,
         uOpacity: options.opacity,
-        uWaveHeight: options.waveHeight
+        uWaveHeight: options.waveHeight,
+        uIntroStrength: 1
       };
       for (const [name, value] of Object.entries(values)) gl.uniform1f(uniforms[name], value);
       gl.uniform3f(uniforms.uFrequency, options.patternFreqX, options.patternFreqY, options.patternFreqXY);
@@ -178,6 +181,7 @@ export class AsciiTilesRenderer {
       if (disposed || lost || !visible || !intersecting || !program) return;
       const animate = !latest.current.paused && options.speed > 0 && !motion.matches;
       const dt = lastTime ? Math.min((now - lastTime) / 1e3, 0.05) : 1 / 60;
+      if (introProgress < 1) introProgress = Math.min(1, introProgress + dt / introDuration);
       if (options.cursorInteraction && !motion.matches) advanceWaves(waveGrid, dt, options.waveSpeed, options.cursorRecovery);
       if (animate && lastTime) time += Math.min((now - lastTime) / 1e3, 0.05) * options.speed;
       lastTime = now;
@@ -193,10 +197,12 @@ export class AsciiTilesRenderer {
         waveGrid.dirty = false;
       }
       gl.uniform1f(uniforms.uTime, time);
+      gl.uniform1f(uniforms.uIntroProgress, introProgress);
+      if (introProgress < 1 || canvas.dataset.introProgress !== "1.0000") canvas.dataset.introProgress = introProgress.toFixed(4);
       gl.uniform2f(uniforms.uPointer, pointerX, pointerY);
       gl.uniform1f(uniforms.uReducedHover, motion.matches && pointerActive && options.cursorInteraction ? 1 : 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      if (animate || waveGrid.active) requestDraw();
+      if (animate || waveGrid.active || introProgress < 1) requestDraw();
     }
     const initialize = () => {
       let vs = null, fs = null;
@@ -273,6 +279,11 @@ export class AsciiTilesRenderer {
       if (options.cursorInteraction) requestDraw();
     };
     const pointer = (event) => {
+      if (event.composedPath().some(target => target instanceof Element && target.matches('button,input,select,a,textarea,[contenteditable=true],[role=dialog],[role=menu],[role=slider]'))) {
+        previousPointer = null;
+        pointerActive = false;
+        return;
+      }
       readPointer(event);
       const now = performance.now() / 1e3;
       const x = event.clientX - rect.left, y = event.clientY - rect.top;
@@ -322,7 +333,7 @@ export class AsciiTilesRenderer {
       initialize();
     };
     const motionChanged = () => {
-      if (motion.matches) clearWaves(waveGrid);
+      if (motion.matches) { clearWaves(waveGrid); introProgress = 1; }
       stop();
       requestDraw();
     };
@@ -340,6 +351,11 @@ export class AsciiTilesRenderer {
     observer.observe(host);
     intersection.observe(host);
     update.current = configure;
+    replay.current = () => {
+      introProgress = motion.matches ? 1 : 0;
+      lastTime = 0;
+      requestDraw();
+    };
     window.addEventListener("pointermove", pointer);
     window.addEventListener("pointerenter", pointerEnter);
     window.addEventListener("pointerdown", pointerDown);
@@ -356,6 +372,7 @@ export class AsciiTilesRenderer {
       disposed = true;
       stop();
       update.current = null;
+      replay.current = null;
       observer.disconnect();
       intersection.disconnect();
       window.removeEventListener("pointermove", pointer);
@@ -374,7 +391,7 @@ export class AsciiTilesRenderer {
     };})();
     initializing=false;
     this.setSettings=next=>{latest.current=next; update.current?.();};
-    this.replay=()=>update.current?.();
+    this.replay=()=>replay.current?.();
     this.ready=Promise.resolve();
   }
 }

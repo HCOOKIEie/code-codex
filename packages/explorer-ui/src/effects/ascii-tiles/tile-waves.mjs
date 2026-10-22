@@ -32,14 +32,15 @@ export function kickWave(grid, x, y, impulse, radius) {
   if (!Number.isFinite(impulse) || impulse === 0) return;
   const [gx, gy] = gridPoint(grid.width, grid.height, grid.density, grid.shear, x, y);
   const pitch = Math.max(grid.width, grid.height) / (grid.density * Math.sqrt(1 + grid.shear * grid.shear));
-  const sigma = Math.max(0.42, radius / pitch);
-  const dxNear = gx - (Math.floor(gx) + 0.5), dyNear = gy - (Math.floor(gy) + 0.5);
-  const nearestSquared = dxNear * dxNear + dyNear * dyNear;
+  // Radius is a CSS-pixel contact footprint, not a Gaussian sigma. A touched
+  // brick presses as one rigid face even when its center lies outside the disk.
+  const sigma = Math.max(0.0001, radius / (3 * pitch));
   for (let iy = 0; iy < grid.rows; iy++) for (let ix = 0; ix < grid.columns; ix++) {
-    const dx = grid.originX + ix + 0.5 - gx, dy = grid.originY + iy + 0.5 - gy;
+    const dx = Math.max(Math.abs(grid.originX + ix + 0.5 - gx) - 0.5, 0);
+    const dy = Math.max(Math.abs(grid.originY + iy + 0.5 - gy) - 0.5, 0);
     const distanceSquared = dx * dx + dy * dy;
     if (distanceSquared > sigma * sigma * 9) continue;
-    const weight = Math.exp(-(distanceSquared - nearestSquared) / (2 * sigma * sigma));
+    const weight = Math.exp(-distanceSquared / (2 * sigma * sigma));
     const i = iy * grid.columns + ix;
     // Inject velocity; never replace the existing displacement or earlier waves.
     grid.velocities[i] = Math.max(-36, Math.min(36, grid.velocities[i] + impulse * weight));
