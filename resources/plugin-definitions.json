@@ -136,12 +136,14 @@
       "name": "Custom Background",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.9",
-      "releaseTag": "plugin-assets-2026-10-18",
+      "version": "1.0.10",
+      "releaseTag": "v0.5.19",
       "capabilities": [
         "background",
         "local-media",
-        "settings"
+        "settings",
+        "startup",
+        "preview"
       ]
     },
     {
@@ -149,8 +151,8 @@
       "name": "UI Surface Opacity",
       "category": "appearance",
       "api": 1,
-      "version": "1.0.3",
-      "releaseTag": "plugin-assets-2026-10-18",
+      "version": "1.0.6",
+      "releaseTag": "v0.5.18",
       "capabilities": [
         "appearance"
       ]
@@ -182,8 +184,8 @@
       "name": "Codex Startup Transition",
       "category": "appearance",
       "api": 1,
-      "version": "1.1.26",
-      "releaseTag": "plugin-assets-2026-10-18",
+      "version": "1.1.27",
+      "releaseTag": "v0.5.19",
       "capabilities": [
         "startup",
         "preview",
@@ -298,6 +300,18 @@
       "releaseTag": "v0.3.96",
       "capabilities": [
         "file-preview"
+      ]
+    },
+    {
+      "id": "ascii-tiles",
+      "name": "ASCII Tiles Background",
+      "category": "appearance",
+      "api": 1,
+      "version": "1.0.7",
+      "releaseTag": "v0.5.15",
+      "capabilities": [
+        "background",
+        "preview"
       ]
     }
   ]

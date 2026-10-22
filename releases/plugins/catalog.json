@@ -457,17 +457,19 @@
     "name": "Custom Background",
     "category": "appearance",
     "api": 1,
-    "version": "1.0.9",
-    "releaseTag": "plugin-assets-2026-10-18",
-    "asset": "CodeCodex-background-custom-background-1.0.9.js",
-    "relativePath": "CodeCodex-background-custom-background-1.0.9.js",
-    "size": 29192,
-    "sha256": "46250603889b6dc143239d9aa943bfa7adcd79b0b32fceac9a57b79262083183",
+    "version": "1.0.10",
+    "releaseTag": "v0.5.19",
+    "asset": "CodeCodex-background-custom-background-1.0.10.js",
+    "relativePath": "CodeCodex-background-custom-background-1.0.10.js",
+    "size": 31263,
+    "sha256": "792a71fa6d89d1a4b5aae1c1bb6baa36f009bf35f43855cee61d1e6792104c1e",
     "resources": [],
     "capabilities": [
       "background",
       "local-media",
-      "settings"
+      "settings",
+      "startup",
+      "preview"
     ],
     "source": "https://github.com/Rice-dog/code-codex"
   },
@@ -476,12 +478,12 @@
     "name": "UI Surface Opacity",
     "category": "appearance",
     "api": 1,
-    "version": "1.0.3",
-    "releaseTag": "plugin-assets-2026-10-18",
-    "asset": "CodeCodex-plugin-surface-opacity-1.0.3.js",
-    "relativePath": "CodeCodex-plugin-surface-opacity-1.0.3.js",
-    "size": 12484,
-    "sha256": "3c0fd562b05ab9af6451cf6e7de0d7d5f8095ce78761650a0a8c4392832c54ab",
+    "version": "1.0.6",
+    "releaseTag": "v0.5.18",
+    "asset": "CodeCodex-plugin-surface-opacity-1.0.6.js",
+    "relativePath": "CodeCodex-plugin-surface-opacity-1.0.6.js",
+    "size": 12760,
+    "sha256": "8b2b40a290c14eea2a69edb617908621a85e2c9dd028998ebea0ac2b149b833f",
     "resources": [],
     "capabilities": [
       "appearance"
@@ -527,12 +529,12 @@
     "name": "Codex Startup Transition",
     "category": "appearance",
     "api": 1,
-    "version": "1.1.26",
-    "releaseTag": "plugin-assets-2026-10-18",
-    "asset": "CodeCodex-plugin-codex-startup-transition-1.1.26.js",
-    "relativePath": "CodeCodex-plugin-codex-startup-transition-1.1.26.js",
-    "size": 38198,
-    "sha256": "0e9a4689d037e93fca94fcff6e981187a8bec80a9ddd511b459a52ca151e58e0",
+    "version": "1.1.27",
+    "releaseTag": "v0.5.19",
+    "asset": "CodeCodex-plugin-codex-startup-transition-1.1.27.js",
+    "relativePath": "CodeCodex-plugin-codex-startup-transition-1.1.27.js",
+    "size": 38281,
+    "sha256": "15c117ceba380815d38928d76c7e40f08c19f952cca37605d4c56b0d7740af82",
     "resources": [],
     "capabilities": [
       "startup",
@@ -759,5 +761,23 @@
     ],
     "source": "https://github.com/Rice-dog/code-codex",
     "notices": "THIRD_PARTY_NOTICES_EN.md"
+  },
+  {
+    "id": "ascii-tiles",
+    "name": "ASCII Tiles Background",
+    "category": "appearance",
+    "api": 1,
+    "version": "1.0.7",
+    "releaseTag": "v0.5.15",
+    "capabilities": [
+      "background",
+      "preview"
+    ],
+    "asset": "CodeCodex-background-ascii-tiles-1.0.7.js",
+    "relativePath": "CodeCodex-background-ascii-tiles-1.0.7.js",
+    "size": 25486,
+    "sha256": "0fb2418cb92a1cf81724f10034881dcafae0e0d6de01d6ef620d1db47869d8da",
+    "resources": [],
+    "source": "https://github.com/Rice-dog/code-codex"
   }
 ]

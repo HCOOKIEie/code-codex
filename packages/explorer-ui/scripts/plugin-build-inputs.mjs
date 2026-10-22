@@ -16,7 +16,7 @@ export async function fingerprintBuildMetadata(root,id) {
  return result;
 }
 export async function additionalBuildInputs(root,p) {
- const builder=p.id==='custom-background'?'build-custom-background.mjs':p.id==='codex-startup-transition'?'build-startup-package.mjs':p.category==='file-preview'?'file-preview-packages.mjs':p.capabilities?.includes('background')?'background-packages.mjs':'utility-packages.mjs';
+ const builder=p.id==='ascii-tiles'?'build-ascii-tiles.mjs':p.id==='custom-background'?'build-custom-background.mjs':p.id==='codex-startup-transition'?'build-startup-package.mjs':p.category==='file-preview'?'file-preview-packages.mjs':p.capabilities?.includes('background')?'background-packages.mjs':'utility-packages.mjs';
  const files=['scripts/'+builder,'scripts/build.mjs','scripts/rebuild-plugins.mjs','scripts/plugin-source-definition.mjs','scripts/plugin-build-inputs.mjs','scripts/plugin-distribution.mjs','../../THIRD_PARTY_NOTICES_EN.md'];
  if(p.id==='codex-startup-transition')files.push('src/startup-transition.css');
  if(p.id==='pixel-sculpt')files.push('src/pixel-sculpt-default.png');

@@ -8,7 +8,7 @@ export const MASK_REGIONS = [
   {key:"tree", zh:"文件树", en:"File tree", value:68},
   {key:"conversation", zh:"对话区", en:"Conversation", value:58},
   {key:"preview", zh:"文件预览区", en:"File preview", value:58},
-  {key:"tabs", zh:"顶部标签栏", en:"Tab bar", value:78},
+  {key:"tabs", zh:"顶部菜单栏", en:"Top menu bar", value:78},
   {key:"composer", zh:"消息输入框", en:"Message composer", value:86},
   {key:"utility", zh:"右侧工具栏", en:"Side panel", value:66},
   {key:"login", zh:"登录页", en:"Sign-in page", value:58},
