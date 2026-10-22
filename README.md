@@ -35,6 +35,8 @@ Code-Codex 是一个非官方社区项目，用来为 Codex Desktop 增加本地
 
 
 
+> 本地维护构建 v0.5.23 始终创建独立 Code-Codex 桌面入口，有原生快捷方式时同时接管；支持受管原生图标丢失后的修复，并保留回滚与卸载恢复。包含原生启动冲突检查改进，尚未公开发布。
+
 ## 安装方式一：直接下载 EXE
 
 推荐从 [GitHub Release v0.5.21](https://github.com/Rice-dog/code-codex/releases/tag/v0.5.21) 下载安装包；[`releases`](releases/) 保留对应构建资产：
@@ -58,8 +60,9 @@ Get-FileHash .\CodeCodex-0.5.21-x64-setup.exe -Algorithm SHA256
 如果已经安装官方 Codex Desktop，安装器会检查当前用户和公共桌面的快捷方式：
 优先使用指向官方 Codex 的快捷方式，也可接管用户创建的 `Codex`、`ChatGPT`
 快捷方式，或指向 `Codex.exe` / `ChatGPT.exe` 的重命名快捷方式。原快捷方式会备份，
-卸载时恢复；只有找不到这些快捷方式时，才会创建独立的 `Code-Codex` 桌面快捷方式。
-安装完成后，安装器会显示实际使用的快捷方式路径。
+卸载时恢复。本地维护构建始终创建独立的 `Code-Codex` 桌面快捷方式：有原生入口时两个入口并存，
+没有原生入口时使用独立入口；有效记录中的原生入口丢失也可以修复。安装完成页显示主入口路径。
+旧公开版采用找不到原生入口时才创建独立入口的策略。
 
 
 ### 集中目录与自定义安装
@@ -155,8 +158,8 @@ EXE/ZIP 用户可在原安装目录直接升级，不需要先卸载；设置、
   `Finalize-Uninstall.ps1` 会位于 `target/release/`。
 
 卸载采用与安装器相同的品牌向导，确认后删除，完成后点击 Finish。运行 `Uninstall-CodeCodex.exe` 即可恢复安装前的桌面快捷方式，并移除
-Code-Codex 文件。如果安装时没有可接管的快捷方式而创建了独立的
-`Code-Codex` 桌面快捷方式，卸载时会删除这个快捷方式。MSI 安装也可以从 Windows
+Code-Codex 文件。本地维护构建卸载时同时删除自建的受管 `Code-Codex` 桌面快捷方式；
+已被用户改为其它程序的入口不会覆盖或删除，冲突会保留恢复状态。MSI 安装也可以从 Windows
 **已安装的应用** 中卸载。
 
 ## 功能

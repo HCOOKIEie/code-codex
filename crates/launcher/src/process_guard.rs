@@ -1995,40 +1995,14 @@ pub fn is_executable_running(executable: &Path) -> Result<bool, ProcessGuardErro
     }
     #[cfg(windows)]
     {
-        // `ChatGPT.exe` is an Electron executable.  Win32_Process reports the
-        // same image path for the browser process and every renderer/GPU/
-        // utility child.  Counting the image path alone therefore makes a
-        // closed window look like a running Codex instance while a child is
-        // still winding down.  Keep the query bounded to a scalar result, but
-        // only count browser/root command lines (known child processes carry
-        // an Electron `--type=` switch).  The diagnostic probe used by our
-        // compatibility checks
-        // checks has a private, recognisable user-data marker and must not
-        // block a normal launch if its parent was orphaned.
-        const SCRIPT: &str = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); function should_count_process([string]$commandLine) { if ([string]::IsNullOrWhiteSpace($commandLine)) { return $true }; if ($commandLine -match '(?i)CodeCodexOfficialProbe-') { return $false }; return $commandLine -notmatch '(?i)(^|\s)--type(?:=|\s+)[\"'']?(?:renderer|gpu-process|utility|crashpad-handler|zygote|sandbox-helper|broker|ppapi)[\"'']?(?=\s|$)' }; $target=[IO.Path]::GetFullPath($env:CLE_CODEX_EXE); $script:ccStep='Get-CimInstance (existing official process)'; Write-CCObservation $script:ccStep 'started' @{}; $count=@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath).Equals($target,[StringComparison]::OrdinalIgnoreCase) -and (should_count_process ([string]$_.CommandLine)) }).Count; [Console]::Write($count.ToString([Globalization.CultureInfo]::InvariantCulture))"#;
-        let executable = dunce::canonicalize(executable)
-            .map_err(|_| ProcessGuardError::ProcessInspectionUnknown)?;
-        if !executable.is_file() {
-            return Err(ProcessGuardError::ProcessInspectionUnknown);
-        }
-        let output = diagnostic_query(
-            "existing process",
-            SCRIPT,
-            &[("CLE_CODEX_EXE", executable.as_os_str())],
-            4096,
-            None,
-            None,
-        )?;
-        parse_running_query_result(true, &output)
+        crate::process_preflight::is_running(executable)
     }
 }
 
 /// Return whether a matching executable process represents an actual browser
-/// (root) process rather than an Electron child.  The Windows query above
-/// mirrors this predicate; keeping it in Rust gives us regression coverage for
-/// command-line shapes seen across Codex Desktop releases.
-#[cfg(test)]
-fn should_count_running_process(command_line: Option<&str>) -> bool {
+/// (root) process rather than an Electron child. The native preflight uses this
+/// predicate only after exact-image verification on a retained process handle.
+pub(crate) fn should_count_running_process(command_line: Option<&str>) -> bool {
     let Some(command_line) = command_line else {
         // An unavailable command line must fail closed.  Treating it as a root
         // process prevents a launcher from racing an uninspectable instance.
@@ -2043,7 +2017,6 @@ fn should_count_running_process(command_line: Option<&str>) -> bool {
     !contains_electron_type_switch(command_line)
 }
 
-#[cfg(test)]
 fn contains_electron_type_switch(command_line: &str) -> bool {
     const CHILD_TYPES: [&str; 8] = [
         "renderer",
@@ -2075,7 +2048,6 @@ fn contains_electron_type_switch(command_line: &str) -> bool {
     false
 }
 
-#[cfg(test)]
 fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
     haystack
         .as_bytes()

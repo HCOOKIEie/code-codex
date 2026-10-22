@@ -11,6 +11,8 @@ mod network_diagnostics;
 mod plugin_store;
 mod process_diagnostics;
 mod process_guard;
+#[cfg(windows)]
+mod process_preflight;
 mod renderer_storage;
 mod runtime_log;
 mod startup_diagnostics;
@@ -254,6 +256,8 @@ async fn main() -> ExitCode {
         runtime_log::begin(mode);
     }
     begin_startup_trace(mode);
+    #[cfg(windows)]
+    process_preflight::observe_origin(mode);
     let result = match command {
         Commands::Run(args) => run(args).await,
         Commands::Attach(args) => attach(args).await,
