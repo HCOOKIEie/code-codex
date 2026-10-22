@@ -1,7 +1,7 @@
 //! Audited integration of Code-Codex with the user's existing Codex shortcut.
 //!
 //! The installer invokes this console binary. It deliberately owns only the desktop
-//! `Codex.lnk`, `ChatGPT.lnk`, the fallback `Code-Codex.lnk`, and legacy
+//! `Codex.lnk`, `ChatGPT.lnk`, the independent `Code-Codex.lnk`, and legacy
 //! shortcuts that can be tied back to this installation root.
 
 use std::fs::{self, OpenOptions};
@@ -241,6 +241,12 @@ struct InstallRollbackSnapshot {
     manifest: Option<EncodedSnapshotFile>,
     backup: Option<EncodedSnapshotFile>,
     icon: Option<EncodedSnapshotFile>,
+    // Older schema1 snapshots only tracked the primary entry. Do not interpret
+    // their absent field as permission to remove a newer independent entry.
+    #[serde(default)]
+    standalone_tracked: bool,
+    #[serde(default)]
+    standalone: Option<EncodedSnapshotFile>,
     #[serde(default)]
     ui_language: Option<workspace_service::ui_language::Preference>,
     #[serde(default)]
@@ -685,6 +691,7 @@ fn preflight(
 
     let official_probe = probe_official_shortcuts(shell, paths)?;
     let fallback = inspect_optional(shell, &paths.fallback_shortcut)?;
+    validate_standalone(shell, paths)?;
     let manifest = read_manifest_optional(&paths.manifest)?;
     if manifest.is_none() && paths.backup.exists() {
         return Err(IntegrationError::InvalidState(
@@ -722,7 +729,11 @@ fn preflight(
                     shortcut_path,
                 ),
                 Some(_) => return Err(IntegrationError::ShortcutConflict),
-                None => return Err(IntegrationError::ShortcutMissing(shortcut_path)),
+                None => (
+                    IntegrationState::Missing,
+                    Some(manifest.installed_version.clone()),
+                    shortcut_path,
+                ),
             }
         }
     } else {
@@ -742,6 +753,12 @@ fn preflight(
         }
     };
 
+    let state = if state == IntegrationState::Managed && fallback.is_none() {
+        IntegrationState::Missing
+    } else {
+        state
+    };
+
     Ok(OperationReport {
         action: "preflight",
         shortcut_path,
@@ -753,10 +770,46 @@ fn preflight(
     })
 }
 
+// The independent desktop entry is not an optional legacy shortcut anymore.
+// Only our exact installation may refresh it; an unrelated same-name file is
+// a conflict, even when the original Codex shortcut can be taken over.
+fn validate_standalone(shell: &impl ShortcutShell, paths: &IntegrationPaths) -> Result<(), IntegrationError> {
+    if inspect_optional(shell, &paths.fallback_shortcut)?.as_ref()
+        .is_some_and(|metadata| !is_owned(metadata, paths) && !is_verified_legacy(metadata, paths)) {
+        return Err(IntegrationError::ShortcutConflict);
+    }
+    Ok(())
+}
+
+fn install_standalone(shell: &impl ShortcutShell, paths: &IntegrationPaths, icon: &Path) -> Result<(), IntegrationError> {
+    validate_standalone(shell, paths)?;
+    let prior = encode_optional_regular_file(&paths.fallback_shortcut)?;
+    let staged = staged_path(&paths.desktop, "Code-Codex.install", "lnk");
+    let result = (|| {
+        shell.create(&staged, &paths.launcher, &paths.install_root, icon, OWNER_MARKER)?;
+        if !is_owned(&shell.inspect(&staged)?, paths) {
+            return Err(IntegrationError::Shell("the independent shortcut lost its ownership metadata".into()));
+        }
+        validate_standalone(shell, paths)?;
+        let current = encode_optional_regular_file(&paths.fallback_shortcut)?;
+        if current.as_ref().map(|file| &file.sha256) != prior.as_ref().map(|file| &file.sha256) {
+            return Err(IntegrationError::ShortcutConflict);
+        }
+        shell.replace_file(&staged, &paths.fallback_shortcut)?;
+        if !is_owned(&shell.inspect(&paths.fallback_shortcut)?, paths) {
+            return Err(IntegrationError::ShortcutConflict);
+        }
+        Ok(())
+    })();
+    remove_if_present(&staged);
+    result
+}
+
 fn prepare_install(
     shell: &impl ShortcutShell,
     paths: &IntegrationPaths,
 ) -> Result<OperationReport, IntegrationError> {
+    validate_standalone(shell, paths)?;
     if paths.install_rollback.exists() {
         reconcile_stale_install_snapshot(shell, paths)?;
     }
@@ -782,7 +835,7 @@ fn prepare_install(
                         active_shortcut,
                     )
                 }
-                None if manifest_uses_fallback_shortcut(paths, manifest) => {
+                None => {
                     validate_manifest_backup_state(shell, paths, manifest)?;
                     (
                         IntegrationState::Missing,
@@ -837,6 +890,12 @@ fn prepare_install(
         manifest: manifest_file,
         backup,
         icon,
+        standalone_tracked: !paths_equal(&active_shortcut, &paths.fallback_shortcut),
+        standalone: if !paths_equal(&active_shortcut, &paths.fallback_shortcut) {
+            encode_optional_regular_file(&paths.fallback_shortcut)?
+        } else {
+            None
+        },
         ui_language: workspace_service::ui_language::LanguageStore::new(paths.install_root.join("data")).load().unwrap_or_else(|error|{eprintln!("{error}; damaged language preference preserved");None}),
         ui_language_written_revision:None,
     };
@@ -862,6 +921,10 @@ fn rollback_install(
     paths: &IntegrationPaths,
 ) -> Result<OperationReport, IntegrationError> {
     let snapshot = read_install_snapshot(paths)?;
+    let standalone_bytes = snapshot.standalone.as_ref().map(decode_snapshot_file).transpose()?;
+    if snapshot.standalone_tracked {
+        validate_standalone(shell, paths)?;
+    }
     let shortcut_bytes = decode_snapshot_file(&snapshot.shortcut)?;
     let manifest_bytes = snapshot
         .manifest
@@ -905,7 +968,7 @@ fn rollback_install(
             {
                 return Err(IntegrationError::ShortcutConflict);
             }
-            restore(shell, paths)?;
+            restore_with_standalone_cleanup(shell, paths, false)?;
         }
     }
     let current = inspect_optional(shell, &snapshot_shortcut)?;
@@ -1014,6 +1077,13 @@ fn rollback_install(
             }
             restore_optional_file(
                 shell,
+                &paths.backup,
+                backup_bytes.as_deref(),
+                "Codex.original.rollback",
+                "lnk",
+            )?;
+            restore_optional_file(
+                shell,
                 &paths.default_icon,
                 icon_bytes.as_deref(),
                 "Codex",
@@ -1033,6 +1103,10 @@ fn rollback_install(
         _ => return Err(invalid_install_snapshot("unsupported prior state")),
     }
 
+    if snapshot.standalone_tracked {
+        validate_standalone(shell, paths)?;
+        restore_optional_file(shell, &paths.fallback_shortcut, standalone_bytes.as_deref(), "Code-Codex.rollback", "lnk")?;
+    }
     remove_safe_regular_file_if_present(&paths.install_rollback)?;
     remove_state_directory_if_empty(paths)?;
     Ok(OperationReport {
@@ -1101,6 +1175,7 @@ fn install_with_legacy_cleanup(
     icon_override: Option<&Path>,
     cleanup_legacy: bool,
 ) -> Result<OperationReport, IntegrationError> {
+    validate_standalone(shell, paths)?;
     validate_version(version)?;
     ensure_safe_regular_file(&paths.launcher)?;
     ensure_safe_directory(&paths.state_directory, true)?;
@@ -1269,6 +1344,9 @@ fn install_with_legacy_cleanup(
             &manifest.original_sha256,
         )?;
         shell.replace_file(&staged, &active_shortcut)?;
+        if !paths_equal(&active_shortcut, &paths.fallback_shortcut) {
+            install_standalone(shell, paths, &icon)?;
+        }
 
         let removed_legacy_shortcuts = if cleanup_legacy {
             remove_verified_legacy_shortcuts(shell, paths, Some(&active_shortcut))?
@@ -1484,6 +1562,14 @@ fn restore(
     shell: &impl ShortcutShell,
     paths: &IntegrationPaths,
 ) -> Result<OperationReport, IntegrationError> {
+    restore_with_standalone_cleanup(shell, paths, true)
+}
+
+fn restore_with_standalone_cleanup(
+    shell: &impl ShortcutShell,
+    paths: &IntegrationPaths,
+    cleanup_standalone: bool,
+) -> Result<OperationReport, IntegrationError> {
     let Some(manifest) = read_manifest_optional(&paths.manifest)? else {
         if paths.backup.exists() {
             return Err(IntegrationError::InvalidState(
@@ -1513,11 +1599,14 @@ fn restore(
     validate_manifest_backup_state(shell, paths, &manifest)?;
 
     let active_shortcut = manifest_shortcut_path(paths, &manifest)?;
+    if cleanup_standalone && !paths_equal(&active_shortcut, &paths.fallback_shortcut) {
+        validate_standalone(shell, paths)?;
+    }
     let current = inspect_optional(shell, &active_shortcut)?;
     let state = match current.as_ref() {
-        Some(metadata)
-            if is_owned(metadata, paths)
-                && manifest_replaces_official_shortcut(paths, &manifest) =>
+        metadata
+            if manifest_replaces_official_shortcut(paths, &manifest)
+                && metadata.is_none_or(|metadata| is_owned(metadata, paths)) =>
         {
             let staged = staged_path(
                 active_shortcut.parent().ok_or_else(|| {
@@ -1529,6 +1618,14 @@ fn restore(
                 "lnk",
             );
             copy_file_exclusive(&paths.backup, &staged)?;
+            // A missing managed original may be recreated, but never replace
+            // a user entry that appeared after the initial observation.
+            if let Err(error) = verify_replacement_guard(shell, paths, &active_shortcut,
+                if current.is_some() { ReplacementGuard::Owned } else { ReplacementGuard::Missing },
+                &manifest.original_sha256) {
+                remove_if_present(&staged);
+                return Err(error);
+            }
             if let Err(error) = shell.replace_file(&staged, &active_shortcut) {
                 remove_if_present(&staged);
                 return Err(error);
@@ -1563,6 +1660,10 @@ fn restore(
         state,
         IntegrationState::Official | IntegrationState::Unconfigured
     ) {
+        if cleanup_standalone && !paths_equal(&active_shortcut, &paths.fallback_shortcut) {
+            validate_standalone(shell, paths)?;
+            remove_safe_regular_file_if_present(&paths.fallback_shortcut)?;
+        }
         remove_integration_state(paths)?;
     }
 
@@ -1611,6 +1712,14 @@ fn status(
             None => IntegrationState::Missing,
             _ => IntegrationState::Conflict,
         };
+        let state = if state == IntegrationState::Managed
+            && !paths_equal(&shortcut_path, &paths.fallback_shortcut) {
+            match inspect_optional(shell, &paths.fallback_shortcut)? {
+                Some(metadata) if is_owned(&metadata, paths) => state,
+                None => IntegrationState::Missing,
+                _ => IntegrationState::Conflict,
+            }
+        } else { state };
         (shortcut_path, state)
     } else {
         match probe_official_shortcuts(shell, paths)? {
@@ -1926,6 +2035,10 @@ fn reconcile_stale_install_snapshot(
     if let Some(icon) = snapshot.icon.as_ref() {
         decode_snapshot_file(icon)?;
     }
+    if let Some(standalone) = snapshot.standalone.as_ref() {
+        decode_snapshot_file(standalone)?;
+    }
+    if snapshot.standalone_tracked { validate_standalone(shell, paths)?; }
     validate_install_snapshot(
         paths,
         &snapshot,
@@ -1958,8 +2071,7 @@ fn reconcile_stale_install_snapshot(
         }
         (None, None) if snapshot.prior_state == IntegrationState::Unconfigured => true,
         (Some(manifest), None)
-            if snapshot.prior_state == IntegrationState::Missing
-                && manifest_uses_fallback_shortcut(paths, manifest) =>
+            if snapshot.prior_state == IntegrationState::Missing =>
         {
             validate_manifest_backup_state(shell, paths, manifest)?;
             true
@@ -2044,14 +2156,19 @@ fn validate_install_snapshot(
                 .ok_or_else(|| invalid_install_snapshot("missing shortcut manifest is absent"))?;
             let manifest: ShortcutManifest = serde_json::from_slice(manifest_bytes)?;
             validate_manifest(&manifest, paths)?;
-            if backup_bytes.is_some()
-                || !manifest_uses_fallback_shortcut(paths, &manifest)
-                || !paths_equal(&snapshot.shortcut_path, &paths.fallback_shortcut)
+            if !paths_equal(&snapshot.shortcut_path, &manifest.shortcut_path)
                 || !snapshot.shortcut.bytes.is_empty()
             {
                 return Err(invalid_install_snapshot(
-                    "missing fallback shortcut has inconsistent saved state",
+                    "missing managed shortcut has inconsistent saved state",
                 ));
+            }
+            if manifest_replaces_official_shortcut(paths, &manifest) {
+                if backup_bytes.map(sha256_bytes).as_deref() != Some(manifest.original_sha256.as_str()) {
+                    return Err(invalid_install_snapshot("missing managed shortcut backup is invalid"));
+                }
+            } else if backup_bytes.is_some() {
+                return Err(invalid_install_snapshot("fallback shortcut unexpectedly has a backup"));
             }
             Ok(Some(manifest.installed_version))
         }
@@ -2306,6 +2423,7 @@ fn remove_verified_legacy_shortcuts(
     }
     let mut removed = Vec::new();
     for candidate in candidates {
+        if paths_equal(&candidate, &paths.fallback_shortcut) { continue; }
         if protected_shortcut.is_some_and(|protected| paths_equal(&candidate, protected)) {
             continue;
         }
@@ -3300,6 +3418,131 @@ mod tests {
     }
 
     #[test]
+    fn dual_entries_are_repaired_and_removed_with_original_restored() {
+        let f = fixture();
+        install(&FakeShell, &f.paths, "0.5.23", None).unwrap();
+        for link in [&f.paths.shortcut, &f.paths.fallback_shortcut] {
+            assert!(is_owned(&FakeShell.inspect(link).unwrap(), &f.paths));
+        }
+        fs::remove_file(&f.paths.fallback_shortcut).unwrap();
+        assert_eq!(status(&FakeShell, &f.paths).unwrap().state, IntegrationState::Missing);
+        prepare_install(&FakeShell, &f.paths).unwrap();
+        install_with_legacy_cleanup(&FakeShell, &f.paths, "0.5.24", None, false).unwrap();
+        commit_install(&FakeShell, &f.paths).unwrap();
+        assert!(f.paths.fallback_shortcut.exists());
+        fs::remove_file(&f.paths.shortcut).unwrap();
+        assert_eq!(preflight(&FakeShell, &f.paths, "0.5.24").unwrap().state, IntegrationState::Missing);
+        prepare_install(&FakeShell, &f.paths).unwrap();
+        prepare_install(&FakeShell, &f.paths).unwrap();
+        install_with_legacy_cleanup(&FakeShell, &f.paths, "0.5.24", None, false).unwrap();
+        rollback_install(&FakeShell, &f.paths).unwrap();
+        assert!(!f.paths.shortcut.exists());
+        assert_eq!(fs::read(&f.paths.backup).unwrap(), f.original);
+        assert!(f.paths.fallback_shortcut.exists());
+        restore(&FakeShell, &f.paths).unwrap();
+        assert_eq!(fs::read(&f.paths.shortcut).unwrap(), f.original);
+        assert!(!f.paths.fallback_shortcut.exists());
+    }
+
+    #[test]
+    fn missing_original_with_corrupt_backup_still_refuses_repair() {
+        let f = fixture();
+        install(&FakeShell, &f.paths, "0.5.22", None).unwrap();
+        fs::remove_file(&f.paths.shortcut).unwrap();
+        fs::write(&f.paths.backup, b"not an original shortcut").unwrap();
+        assert!(preflight(&FakeShell, &f.paths, "0.5.23").is_err());
+        assert!(prepare_install(&FakeShell, &f.paths).is_err());
+        assert!(restore(&FakeShell, &f.paths).is_err());
+        assert!(!f.paths.shortcut.exists());
+    }
+
+    #[test]
+    fn old_official_only_manifest_upgrades_and_rollback_removes_new_entry() {
+        let f = fixture();
+        install(&FakeShell, &f.paths, "0.5.22", None).unwrap();
+        fs::remove_file(&f.paths.fallback_shortcut).unwrap();
+        let original = fs::read(&f.paths.shortcut).unwrap();
+        let manifest = fs::read(&f.paths.manifest).unwrap();
+        prepare_install(&FakeShell, &f.paths).unwrap();
+        install_with_legacy_cleanup(&FakeShell, &f.paths, "0.5.23", None, false).unwrap();
+        assert!(f.paths.fallback_shortcut.exists());
+        rollback_install(&FakeShell, &f.paths).unwrap();
+        assert!(!f.paths.fallback_shortcut.exists());
+        assert_eq!(fs::read(&f.paths.shortcut).unwrap(), original);
+        assert_eq!(fs::read(&f.paths.manifest).unwrap(), manifest);
+    }
+
+    #[test]
+    fn schema1_snapshot_without_secondary_fields_remains_readable() {
+        let f = fixture();
+        prepare_install(&FakeShell, &f.paths).unwrap();
+        let mut old: serde_json::Value = serde_json::from_slice(&fs::read(&f.paths.install_rollback).unwrap()).unwrap();
+        old.as_object_mut().unwrap().remove("standaloneTracked");
+        old.as_object_mut().unwrap().remove("standalone");
+        fs::write(&f.paths.install_rollback, serde_json::to_vec(&old).unwrap()).unwrap();
+        let snapshot = read_install_snapshot(&f.paths).unwrap();
+        assert!(!snapshot.standalone_tracked);
+        rollback_install(&FakeShell, &f.paths).unwrap();
+        assert_eq!(fs::read(&f.paths.shortcut).unwrap(), f.original);
+    }
+
+    #[test]
+    fn dual_entry_upgrade_rollback_preserves_both_previous_bytes() {
+        let f = fixture();
+        install(&FakeShell, &f.paths, "0.5.22", None).unwrap();
+        let primary = fs::read(&f.paths.shortcut).unwrap();
+        let secondary = fs::read(&f.paths.fallback_shortcut).unwrap();
+        prepare_install(&FakeShell, &f.paths).unwrap();
+        install_with_legacy_cleanup(&FakeShell, &f.paths, "0.5.23", None, false).unwrap();
+        rollback_install(&FakeShell, &f.paths).unwrap();
+        assert_eq!(fs::read(&f.paths.shortcut).unwrap(), primary);
+        assert_eq!(fs::read(&f.paths.fallback_shortcut).unwrap(), secondary);
+    }
+
+    #[test]
+    fn independent_entry_user_replacement_blocks_install_restore_and_rollback() {
+        let f = fixture();
+        install(&FakeShell, &f.paths, "0.5.22", None).unwrap();
+        prepare_install(&FakeShell, &f.paths).unwrap();
+        write_fixture(&f.paths.fallback_shortcut, &unrelated_metadata()).unwrap();
+        let user = fs::read(&f.paths.fallback_shortcut).unwrap();
+        let primary = fs::read(&f.paths.shortcut).unwrap();
+        assert!(preflight(&FakeShell, &f.paths, "0.5.23").is_err());
+        assert!(install(&FakeShell, &f.paths, "0.5.23", None).is_err());
+        assert!(restore(&FakeShell, &f.paths).is_err());
+        assert!(rollback_install(&FakeShell, &f.paths).is_err());
+        assert_eq!(fs::read(&f.paths.fallback_shortcut).unwrap(), user);
+        assert_eq!(fs::read(&f.paths.shortcut).unwrap(), primary);
+        assert!(f.paths.install_rollback.exists());
+    }
+
+    struct IndependentFailureShell;
+    impl ShortcutShell for IndependentFailureShell {
+        fn inspect(&self, p: &Path) -> Result<ShortcutMetadata, IntegrationError> { FakeShell.inspect(p) }
+        fn create(&self, p: &Path, t: &Path, w: &Path, i: &Path, d: &str) -> Result<(), IntegrationError> { FakeShell.create(p,t,w,i,d) }
+        fn official_icon_pngs(&self) -> Result<Vec<Vec<u8>>, IntegrationError> { FakeShell.official_icon_pngs() }
+        fn replace_file(&self, s: &Path, d: &Path) -> Result<(), IntegrationError> {
+            if d.file_name().is_some_and(|n| n == FALLBACK_SHORTCUT_NAME) {
+                return Err(IntegrationError::Shell("injected independent entry failure".into()));
+            }
+            FakeShell.replace_file(s,d)
+        }
+    }
+
+    #[test]
+    fn second_entry_failure_keeps_recovery_and_rolls_back_fresh_install() {
+        let f = fixture();
+        prepare_install(&FakeShell, &f.paths).unwrap();
+        assert!(install_with_legacy_cleanup(&IndependentFailureShell, &f.paths, "0.5.23", None, false).is_err());
+        assert!(commit_install(&FakeShell, &f.paths).is_err());
+        assert!(f.paths.install_rollback.exists());
+        rollback_install(&FakeShell, &f.paths).unwrap();
+        assert_eq!(fs::read(&f.paths.shortcut).unwrap(), f.original);
+        assert!(!f.paths.fallback_shortcut.exists());
+        assert!(!f.paths.manifest.exists());
+    }
+
+    #[test]
     fn versioned_root_launcher_migrates_old_owned_shortcut_and_restores_original() {
         let f = fixture();
         install(&FakeShell, &f.paths, "0.4.61", None).unwrap();
@@ -3346,6 +3589,7 @@ mod tests {
         let old = IntegrationPaths::resolve(root, Some(&f.paths.desktop), f.paths.start_menu.as_deref()).unwrap();
         install(&FakeShell, &old, "0.4.62", None).unwrap();
         let old_shortcut = fs::read(&old.shortcut).unwrap();
+        let old_standalone = fs::read(&old.fallback_shortcut).unwrap();
         let old_manifest = fs::read(&old.manifest).unwrap();
         prepare_install(&FakeShell, &old).unwrap();
         fs::write(root.join("current-version"), "0.4.63\n").unwrap();
@@ -3355,6 +3599,7 @@ mod tests {
         assert_eq!(read_manifest_optional(&next.manifest).unwrap().unwrap().launcher_path, next.launcher);
         rollback_install(&FakeShell, &next).unwrap();
         assert_eq!(fs::read(&old.shortcut).unwrap(), old_shortcut);
+        assert_eq!(fs::read(&old.fallback_shortcut).unwrap(), old_standalone);
         assert_eq!(fs::read(&old.manifest).unwrap(), old_manifest);
     }
 
@@ -3557,7 +3802,7 @@ mod tests {
     }
 
     #[test]
-    fn install_uses_chatgpt_shortcut_before_creating_fallback() {
+    fn install_takes_over_chatgpt_and_keeps_independent_entry() {
         let fixture = fixture();
         let shell = FakeShell;
         fs::remove_file(&fixture.paths.shortcut).expect("remove Codex shortcut");
@@ -3578,13 +3823,10 @@ mod tests {
         let installed = install(&shell, &fixture.paths, "0.1.4", None).expect("install");
         assert_eq!(installed.state, IntegrationState::Managed);
         assert_eq!(installed.shortcut_path, fixture.paths.chatgpt_shortcut);
-        assert_eq!(
-            installed.removed_legacy_shortcuts,
-            vec![fixture.paths.fallback_shortcut.clone()]
-        );
+        assert!(installed.removed_legacy_shortcuts.is_empty());
         assert!(!fixture.paths.shortcut.exists());
         assert!(fixture.paths.chatgpt_shortcut.exists());
-        assert!(!fixture.paths.fallback_shortcut.exists());
+        assert!(fixture.paths.fallback_shortcut.exists());
         assert_eq!(
             fs::read(&fixture.paths.backup).expect("ChatGPT backup"),
             chatgpt_original
@@ -3624,7 +3866,7 @@ mod tests {
 
         let installed = install(&shell, &fixture.paths, "0.1.4", None).expect("install");
         assert_eq!(installed.shortcut_path, fixture.paths.chatgpt_shortcut);
-        assert!(!fixture.paths.fallback_shortcut.exists());
+        assert!(fixture.paths.fallback_shortcut.exists());
         assert_eq!(fs::read(&fixture.paths.backup).unwrap(), original);
         assert!(is_owned(
             &shell.inspect(&fixture.paths.chatgpt_shortcut).unwrap(),
@@ -3647,7 +3889,7 @@ mod tests {
 
         let installed = install(&shell, &fixture.paths, "0.1.4", None).expect("install");
         assert_eq!(installed.shortcut_path, custom);
-        assert!(!fixture.paths.fallback_shortcut.exists());
+        assert!(fixture.paths.fallback_shortcut.exists());
         assert!(is_owned(&shell.inspect(&custom).unwrap(), &fixture.paths));
 
         restore(&shell, &fixture.paths).expect("restore");
@@ -3671,7 +3913,7 @@ mod tests {
 
         let installed = install(&shell, &fixture.paths, "0.1.4", None).expect("install");
         assert_eq!(installed.shortcut_path, custom);
-        assert!(!fixture.paths.fallback_shortcut.exists());
+        assert!(fixture.paths.fallback_shortcut.exists());
         restore(&shell, &fixture.paths).expect("restore");
         assert_eq!(fs::read(&custom).unwrap(), original);
     }
@@ -3704,7 +3946,7 @@ mod tests {
 
         let installed = install(&shell, &fixture.paths, "0.1.4", None).expect("install");
         assert_eq!(installed.shortcut_path, public_shortcut);
-        assert!(!fixture.paths.fallback_shortcut.exists());
+        assert!(fixture.paths.fallback_shortcut.exists());
         assert!(is_owned(
             &shell.inspect(&public_shortcut).unwrap(),
             &fixture.paths
@@ -3765,11 +4007,8 @@ mod tests {
         let migrated = install(&shell, &fixture.paths, "0.1.5", None).expect("migration install");
         assert_eq!(migrated.state, IntegrationState::Managed);
         assert_eq!(migrated.shortcut_path, fixture.paths.chatgpt_shortcut);
-        assert_eq!(
-            migrated.removed_legacy_shortcuts,
-            vec![fixture.paths.fallback_shortcut.clone()]
-        );
-        assert!(!fixture.paths.fallback_shortcut.exists());
+        assert!(migrated.removed_legacy_shortcuts.is_empty());
+        assert!(fixture.paths.fallback_shortcut.exists());
         assert_eq!(
             fs::read(&fixture.paths.backup).expect("ChatGPT backup"),
             chatgpt_original
@@ -4095,8 +4334,8 @@ mod tests {
         let committed = commit_install(&shell, &fixture.paths).expect("commit install");
         assert_eq!(committed.state, IntegrationState::Managed);
         assert_eq!(committed.installed_version.as_deref(), Some("0.1.4"));
-        assert_eq!(committed.removed_legacy_shortcuts, vec![legacy.clone()]);
-        assert!(!legacy.exists());
+        assert!(committed.removed_legacy_shortcuts.is_empty());
+        assert!(is_owned(&shell.inspect(&legacy).unwrap(), &fixture.paths));
         assert!(!fixture.paths.install_rollback.exists());
         assert!(fixture.paths.manifest.exists());
         assert!(fixture.paths.backup.exists());
@@ -4321,9 +4560,9 @@ mod tests {
         let report = install(&shell, &fixture.paths, "0.1.4", None).expect("install");
         assert_eq!(
             report.removed_legacy_shortcuts,
-            vec![owned_legacy.clone(), nested_owned_legacy]
+            vec![nested_owned_legacy]
         );
-        assert!(!owned_legacy.exists());
+        assert!(is_owned(&shell.inspect(&owned_legacy).unwrap(), &fixture.paths));
         assert!(unrelated_legacy.exists());
         assert!(!legacy_product_directory.exists());
     }
@@ -4430,7 +4669,7 @@ mod tests {
             status(&FakeShell, &fixture.paths)
                 .expect("managed recovery status")
                 .state,
-            IntegrationState::Managed
+            IntegrationState::Missing
         );
         assert!(fixture.paths.manifest.is_file());
         assert_eq!(
@@ -4472,7 +4711,7 @@ mod tests {
 
         let report = install(&shell, &paths, "0.1.4", None).expect("install");
         assert_eq!(report.shortcut_path, paths.chatgpt_shortcut);
-        assert!(!paths.fallback_shortcut.exists());
+        assert!(paths.fallback_shortcut.exists());
         restore(&shell, &paths).expect("restore");
         assert_eq!(fs::read(&paths.chatgpt_shortcut).unwrap(), original);
     }

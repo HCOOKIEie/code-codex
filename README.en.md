@@ -38,6 +38,8 @@ A subdued green arrow appears beside the version when an update is available; an
 
 
 
+> Local maintenance build v0.5.23 always creates an independent Code-Codex desktop entry alongside takeover of an available original shortcut. Missing managed originals can be repaired, with rollback and uninstall restoration preserved. Includes native startup conflict checks; not publicly released.
+
 ## Install Option 1: Download EXE
 
 Download the installer from [GitHub Release v0.5.21](https://github.com/Rice-dog/code-codex/releases/tag/v0.5.21). [`releases`](releases/) retains the corresponding build assets:
@@ -62,9 +64,11 @@ When the official Codex Desktop app is installed, setup checks both the user's
 desktop and the shared Public Desktop. It prefers a shortcut to the official
 Codex app, and can also adopt a user-created `Codex` or `ChatGPT` shortcut, or
 a renamed shortcut pointing to `Codex.exe` or `ChatGPT.exe`. Setup backs up the
-original shortcut for uninstall and creates a separate `Code-Codex` desktop
-shortcut only when none of these exists. The completion dialog shows the
-shortcut path it configured.
+original shortcut for uninstall. The local maintenance build always creates a
+separate `Code-Codex` desktop entry alongside any original shortcut takeover.
+Without an original, the independent entry is used; missing managed originals
+can be repaired. The completion dialog shows the primary entry path. Older
+public builds create the independent entry only when no original is available.
 
 ## Install Option 2: Build EXEs From Source
 
@@ -147,8 +151,9 @@ Every install path includes a source-built uninstaller program:
   `Uninstall-CodeCodex.ps1`, and `Finalize-Uninstall.ps1` in `target/release/`.
 
 Run `Uninstall-CodeCodex.exe` to restore the original desktop shortcut and
-remove Code-Codex files. If installation created a standalone `Code-Codex`
-desktop shortcut because no suitable shortcut existed, uninstall removes it.
+remove Code-Codex files. The local maintenance build also removes its managed
+standalone `Code-Codex` desktop entry. User replacements are neither overwritten
+nor deleted; conflicts retain recovery state.
 MSI installs can also be removed from Windows **Installed apps**.
 
 ## Features
