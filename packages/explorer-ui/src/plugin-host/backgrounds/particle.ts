@@ -216,6 +216,8 @@ export class ParticleBackgroundController {
     } finally {
       this.#pending = false;
       this.#notify();
+      // Image activation cannot schedule while its enclosing transaction is pending.
+      this.#scheduleRotation();
     }
   }
 
@@ -332,6 +334,7 @@ export class ParticleBackgroundController {
     } finally {
       this.#pending = false;
       this.#notify();
+      this.#scheduleRotation();
     }
   }
 
@@ -445,6 +448,7 @@ export class ParticleBackgroundController {
     } finally {
       this.#pending = false;
       this.#notify();
+      this.#scheduleRotation();
     }
   }
 
