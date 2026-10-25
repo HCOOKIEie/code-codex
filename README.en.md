@@ -1,5 +1,15 @@
 # Code-Codex
 
+Windows startup can offer a consent-based graceful restart when an unmanaged
+official Codex instance is already open. The dialog warns about interrupted tasks
+and unsaved changes, with an optional remembered choice. See [startup conflict
+recovery](docs/startup-conflict-recovery.md) for revocation and validation limits.
+
+The top **Code-Codex** menu offers **Start Code-Codex when I sign in**, off by
+default and reversible. It never changes official Codex startup or grants restart
+consent. Upgrades preserve the choice; uninstall removes the entry. See
+[Windows login startup](docs/login-startup.md) for CLI revocation and limits.
+
 [简体中文](README.md) | English
 
 <p align="center">
@@ -38,7 +48,7 @@ A subdued green arrow appears beside the version when an update is available; an
 
 
 
-> Local maintenance build v0.5.23 always creates an independent Code-Codex desktop entry alongside takeover of an available original shortcut. Missing managed originals can be repaired, with rollback and uninstall restoration preserved. Includes native startup conflict checks; not publicly released.
+> Local test build v0.5.31 reconciles stale process snapshot entries after shutdown. OpenProcess87 on a nonzero PID requires a complete fresh snapshot confirming that PID is absent, then a full rescan. Present, inaccessible or unknown processes still block relaunch. Retains bounded teardown, the compact diagnostic and global-language Suggested action. Includes PR #66 and unmerged PR #67; login startup defaults off. Known dismissed-tree/menu and localized login-error issues remain. Not publicly released.
 
 ## Install Option 1: Download EXE
 

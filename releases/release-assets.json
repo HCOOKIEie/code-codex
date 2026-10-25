@@ -1,27 +1,27 @@
 [
   {
-    "assetName": "CodeCodex-0.5.23-x64-setup.exe",
-    "path": "CodeCodex-0.5.23-x64-setup.exe",
-    "size": 15875130,
-    "sha256": "e597686321c39081277207a7743a1ef39c3da1a957ff34f64e256a4bead6047e"
+    "assetName": "CodeCodex-0.5.31-x64-setup.exe",
+    "path": "CodeCodex-0.5.31-x64-setup.exe",
+    "size": 16079590,
+    "sha256": "59c20ab833cbe8d90d4e83676b41e9302ef507244639c5fdb66f6c1a45af74ba"
   },
   {
-    "assetName": "CodeCodex-0.5.23-x64.msi",
-    "path": "CodeCodex-0.5.23-x64.msi",
-    "size": 10919936,
-    "sha256": "d464274df55a78ccff9b46cfe7aa0f976aa89fa09d1e846812082db47e032deb"
+    "assetName": "CodeCodex-0.5.31-x64.msi",
+    "path": "CodeCodex-0.5.31-x64.msi",
+    "size": 11075584,
+    "sha256": "c483fb9952657e226bb062177708fdf2d63b4aebd6ecb42e02c574d720c73dde"
   },
   {
-    "assetName": "CodeCodex-0.5.23-x64.zip",
-    "path": "CodeCodex-0.5.23-x64.zip",
-    "size": 13115426,
-    "sha256": "7c9771e7cee99e4ebade5235b5860f2e69b6f3caca0fc38433fce7cbdbc96002"
+    "assetName": "CodeCodex-0.5.31-x64.zip",
+    "path": "CodeCodex-0.5.31-x64.zip",
+    "size": 13314766,
+    "sha256": "cf9928558d18d72f7139b469058aa2168d4a626b5f61c79399c364dd5fe7bd30"
   },
   {
     "assetName": "Uninstall-CodeCodex.exe",
     "path": "Uninstall-CodeCodex.exe",
-    "size": 2692096,
-    "sha256": "cd338ef811a3027b37f0a92f3289618df102eccca806ff653d1b047d8684dc76"
+    "size": 2701824,
+    "sha256": "c2c7e4f2a3fd1d6641165d3a990747148a465e5ea0ba207b8904427c64dc6711"
   },
   {
     "releaseTag": "v0.3.96",
@@ -325,7 +325,7 @@
     "sha256": "0fb2418cb92a1cf81724f10034881dcafae0e0d6de01d6ef620d1db47869d8da"
   },
   {
-    "assetName": "CodeCodex-plugin-catalog-0.5.23.json",
+    "assetName": "CodeCodex-plugin-catalog-0.5.31.json",
     "path": "plugins/catalog.json",
     "size": 27005,
     "sha256": "bcd02cb46d0266add87015d33e724e7d314a78cd6ea00a64842870264f5566cc"
