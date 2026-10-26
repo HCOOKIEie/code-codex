@@ -87,7 +87,7 @@ async fn restore_native_media(
         json!({"scope":scope,"sourceCount":video_ids.len(),"networkRequested":false}),
     );
     for doc in listed.as_array().into_iter().flatten().filter(|doc| {
-        scope != "startup"
+        (scope != "startup" && scope != "custom-background")
             || doc["id"]
                 .as_str()
                 .is_some_and(|id| video_ids.iter().any(|wanted| wanted == id))
@@ -150,7 +150,7 @@ async fn restore_native_media(
 }
 
 fn startup_restore_video_id<'a>(listed: &Value, scope: &str, preferred: &'a str) -> &'a str {
-    if scope == "startup" || listed
+    if scope == "startup" || scope == "custom-background" || listed
         .as_array()
         .into_iter()
         .flatten()
@@ -168,6 +168,7 @@ fn startup_restore_selects_one_video_without_restoring_library() {
     let listed = json!([{"id":"selected"},{"id":"second"},{"id":"third"}]);
     assert_eq!(startup_restore_video_id(&listed, "startup", "second"), "second");
     assert_eq!(startup_restore_video_id(&listed, "startup", "missing"), "missing");
+    assert_eq!(startup_restore_video_id(&listed, "custom-background", "missing"), "missing");
     assert_eq!(startup_restore_video_id(&listed, "particle-image", "missing"), "selected");
     assert_eq!(
         listed
@@ -341,7 +342,7 @@ async fn session(
         ),
     }
     let selected = command(&mut socket, &mut id, "Runtime.evaluate", json!({
-        "expression":"(()=>{try{const s=JSON.parse(localStorage.getItem('code-codex:startup-transition:v1')||'null');return {enabled:s?.enabled===true,backgroundId:s?.enabled&&s.source==='background'?s.backgroundId:'',videoId:s?.selectedVideoId??'selected'}}catch{return {enabled:false,backgroundId:''}}})()",
+        "expression":"(()=>{try{const s=JSON.parse(localStorage.getItem('code-codex:startup-transition:v1')||'null');return {enabled:s?.enabled===true,backgroundId:s?.enabled&&s.source==='background'?s.backgroundId:'',videoId:s?.source==='background'&&s.backgroundId==='custom-background'?JSON.parse(localStorage.getItem('code-codex:custom-background:v1')||'{}').selected??'':s?.selectedVideoId??'selected'}}catch{return {enabled:false,backgroundId:''}}})()",
         "returnByValue":true
     })).await.ok().and_then(|value|value.pointer("/result/value").cloned()).unwrap_or(Value::Null);
     let enabled = selected
@@ -362,6 +363,7 @@ async fn session(
                 "images",
             )),
             "pixel-sculpt" => Some(("pixel-sculpt", "code-codex-pixel-sculpt", "images")),
+            "custom-background" => Some(("custom-background", "code-codex-custom-background", "media")),
             "" => Some(("startup", "code-codex-startup-transition", "video")),
             _ => None,
         };

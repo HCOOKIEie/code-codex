@@ -1,3 +1,4 @@
+import {buildAsciiTiles} from './build-ascii-tiles.mjs';
 import {readFile,writeFile,mkdir,cp,rm} from 'node:fs/promises';
 import {resolve,relative} from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -19,14 +20,15 @@ export async function rebuildPlugins(root,options,selection){
  const stage=resolve(root,'dist',`.plugin-build-${randomUUID()}`),report=[];await mkdir(stage,{recursive:true});
  try{
   const catalog=await buildBackgroundPackages(root,options,stage);
+  catalog.push(await buildAsciiTiles(root,options,stage));
   catalog.push(await buildCustomBackground(root,options,stage));
   catalog.push(...await buildUtilityPackages(root,options,stage));
   catalog.push(await buildStartupPackage(root,options,stage));
   catalog.push(...await buildFilePreviewPackages(root,options,stage));
   const next=[];
-  for(const previous of old.packages){const id=previous.descriptor.id,p=catalog.find(p=>p.id===id);
+  for(const previous of [...old.packages,...catalog.filter(p=>!old.packages.some(item=>item.descriptor.id===p.id)).map(descriptor=>({descriptor:{id:descriptor.id,version:null,resources:[]}}))]){const id=previous.descriptor.id,p=catalog.find(p=>p.id===id);
    if(!p)throw Error(`Builder lost a declared package: ${id}`);
-   if(!ids.has(id)){next.push(previous);continue;}
+   if(!ids.has(id)){if(!previous.artifactRoot)throw Error(`New plugin ${id} requires an explicit rebuild selection.`);next.push(previous);continue;}
    const same=p.sha256===previous.descriptor.sha256&&p.size===previous.descriptor.size&&p.version===previous.descriptor.version;
    if(!same&&p.version===previous.descriptor.version)report.push({id,status:'independent-version-required',oldVersion:p.version,newSha256:p.sha256,oldSha256:previous.descriptor.sha256});
    for(const resource of p.resources??[]){const prior=previous.descriptor.resources?.find(a=>a.asset===resource.asset&&a.size===resource.size&&a.sha256===resource.sha256);if(prior)resource.releaseTag=prior.releaseTag??previous.descriptor.releaseTag;}

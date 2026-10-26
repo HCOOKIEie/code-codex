@@ -4,6 +4,7 @@ import { PreviewClockFollower } from "../../../src/core/media/preview-clock";
 import { nativeSettingsBackgroundCss } from "../../../src/native-background-surfaces";
 import { controls,defaults,KEY,normalizeParameters,type Media,type Parameters } from "./model";
 import { transaction } from "./repository";
+import { applyMediaParameters } from './media-presentation';
 
 
 export class CustomBackground {
@@ -168,7 +169,7 @@ html[data-code-codex-custom-background] body :is(aside[data-app-shell-focus-area
   }
   this.#styleMedia();this.#startPreviewSync();
  }
- #styleMedia(){const record=this.#records.find(r=>r.id===this.#selected);if(!record)return;const p=record.parameters;for(const media of [...this.#panel.querySelectorAll<HTMLImageElement|HTMLVideoElement>('.custom-background-preview img,.custom-background-preview video'),...(this.#media?[this.#media]:[])]){media.style.objectFit=p.fit;media.style.transform=`translate(${p.x}%,${p.y}%) rotate(${p.rotation}deg) scale(${p.scale/100})`;media.style.opacity=String(p.opacity/100);media.style.filter=`blur(${p.blur}px) brightness(${p.brightness/100}) contrast(${p.contrast/100}) saturate(${p.saturation/100})`;if(media instanceof HTMLVideoElement)media.playbackRate=p.speed;}}
+ #styleMedia(){const record=this.#records.find(r=>r.id===this.#selected);if(!record)return;const p=record.parameters;for(const media of [...this.#panel.querySelectorAll<HTMLImageElement|HTMLVideoElement>('.custom-background-preview img,.custom-background-preview video'),...(this.#media?[this.#media]:[])]){applyMediaParameters(media,p);}}
  setLanguage(language:string){this.root.querySelector<HTMLElement>('[data-appearance-plugin="code-codex.custom-background-background"]')!.dataset.language=language;this.#panel.dataset.language=language;this.#panel.lang=language==='zh'?'zh-CN':'en';const fit=this.#panel.querySelector<HTMLSelectElement>('#cle-custom-fit')!;fit.options[0]!.textContent=language==='zh'?'铺满':'Cover';fit.options[1]!.textContent=language==='zh'?'完整显示':'Contain';const reset=this.#panel.querySelector<HTMLButtonElement>('.custom-background-reset')!;reset.textContent=language==='zh'?'重置参数':'Reset';reset.title=language==='zh'?'重置当前素材的参数':'Reset parameters for the selected media';this.#renderStatus();}
  #trigger(){return this.root.querySelector<HTMLButtonElement>('.custom-background-settings')!;}
  #open(){
