@@ -445,6 +445,9 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let image = directory.path().join("snapshot-exit-fixture.exe");
         std::fs::copy(std::env::current_exe().unwrap(), &image).unwrap();
+        // inspect() canonicalizes before scan_entries(). Temp paths on hosted
+        // Windows runners may contain RUNNER~1; retain that production contract.
+        let image = dunce::canonicalize(image).unwrap();
         let mut child = snapshot_child(&image, 200);
         let pid = child.id();
         let entry = capture_entries(Instant::now(), Duration::from_secs(2))
