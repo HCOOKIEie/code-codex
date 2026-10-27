@@ -262,10 +262,16 @@ try {
     $transport.RedirectStandardInput=$true
     $transport.RedirectStandardOutput=$true
     $transport.RedirectStandardError=$true
+    # .NET Framework creates redirected stdin using Console.InputEncoding.
+    # Match the raw UTF-8/no-BOM production writer even on UTF-8 CI consoles.
     $transport.StandardOutputEncoding=[Text.UTF8Encoding]::new($false)
     $transport.EnvironmentVariables['CLE_RESTART_MODE']='reset'
     $transport.EnvironmentVariables['CLE_RESTART_PREFERENCE']=$preference
-    $worker=[Diagnostics.Process]::Start($transport)
+    $priorInputEncoding=[Console]::InputEncoding
+    try {
+        [Console]::InputEncoding=[Text.UTF8Encoding]::new($false)
+        $worker=[Diagnostics.Process]::Start($transport)
+    } finally { [Console]::InputEncoding=$priorInputEncoding }
     try {
         $unicode=[string][char]0x4e2d+[char]0x6587
         # Simulate module-import progress before the source itself runs. The
