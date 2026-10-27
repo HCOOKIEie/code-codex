@@ -48,7 +48,7 @@ A subdued green arrow appears beside the version when an update is available; an
 
 
 
-> Local test build v0.5.38 keeps waiting for the initial native page beyond the 120-second observation budget without closing Codex. A prolonged startup animation yields to the native interface without inferring readiness or network failure. Retains silent delayed restart recovery and real readiness checks. Retains protection that prevents an old injected language service from overwriting the current runtime, restores the centered concise login-startup confirmation and complete bilingual controls, and localizes all 26 plugin display names. Retains native-style menu highlight/hover, right-aligned checks and the uninstall-wizard entry. Plugin IDs, download URLs and bytes remain unchanged. PR #67 is not merged on GitHub; this build is not publicly released.
+> Local test build v0.5.38 keeps waiting for the initial native page beyond the 120-second observation budget without closing Codex. A prolonged startup animation yields to the native interface without inferring readiness or network failure. Retains silent delayed restart recovery and real readiness checks. Retains protection that prevents an old injected language service from overwriting the current runtime, restores the centered concise login-startup confirmation and complete bilingual controls, and localizes all 26 plugin display names. Retains native-style menu highlight/hover, right-aligned checks and the uninstall-wizard entry. Plugin IDs, download URLs and bytes remain unchanged. The local installer has not been published as a GitHub Release; source integration and software publication are separate steps.
 
 ## Install Option 1: Download EXE
 
