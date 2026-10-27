@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
-import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import {resolve} from 'node:path';
 import {createServer} from 'node:http';
 import {launchFixture,delay} from './browser-fixture.mjs';
@@ -9,8 +9,9 @@ const root=resolve(import.meta.dirname,'..'),ui=resolve(root,'packages/explorer-
 const version=JSON.parse(readFileSync(resolve(ui,'package.json'),'utf8')).version;
 const names=JSON.parse(readFileSync(resolve(root,'resources/plugin-display-names.json'),'utf8')),zh=JSON.parse(readFileSync(resolve(root,'resources/i18n/zh-CN.json'),'utf8'));
 const {build}=createRequire(resolve(ui,'package.json'))('esbuild');
-const frozenRef='8023bb2e9b54c99a335f5d6d3a58d97d947b33f3';
-const old=file=>execFileSync('git',['show',frozenRef+':'+file],{cwd:root,encoding:'utf8'});
+const frozenRoot=resolve(root,'scripts/fixtures/language-v0.5.31');
+const frozen=JSON.parse(readFileSync(resolve(frozenRoot,'manifest.json'),'utf8'));
+const old=file=>{const bytes=readFileSync(resolve(frozenRoot,file));assert.equal(createHash('sha256').update(bytes).digest('hex'),frozen.sha256[file],`Frozen legacy fixture changed: ${file}`);return bytes.toString('utf8');};
 await build({stdin:{contents:old('packages/explorer-ui/src/core/localization/runtime.ts'),resolveDir:resolve(ui,'src/core/localization'),loader:'ts'},bundle:true,format:'iife',outfile:resolve(out,'old.js'),plugins:[{name:'old-catalog',setup(b){b.onLoad({filter:/resources[\\/]i18n[\\/](en|zh-CN)\.json$/},args=>({contents:old('resources/i18n/'+args.path.split(/[\\/]/).at(-1)),loader:'json'}));}}]});
 await build({stdin:{contents:`import './core/localization/runtime';import{ApplicationDialog}from './components/application-dialog';import{localizeOwnedUi,applyLanguage}from './i18n';window.dialog=new ApplicationDialog();window.service=()=>window[Symbol.for('code-codex:language-service:v1')];window.locale=(locale)=>applyLanguage({schema:1,locale,revision:++window.revision,source:'menu'});window.revision=0;locale('zh-CN');window.disposeUi=localizeOwnedUi(document.querySelector('#owned'));`,resolveDir:resolve(ui,'src'),loader:'ts'},define:{__CODE_CODEX_VERSION__:JSON.stringify(version)},bundle:true,format:'iife',outfile:resolve(out,'current.js')});
 const html=`<!doctype html><meta charset="utf-8"><style>dialog{margin:0;inset:0}</style><div id="owned">${Object.entries(names).map(([id,name])=>`<article class="preview-extension" data-id="${id}"><h4>${name}</h4></article><h3 data-plugin-name>${name}</h3>`).join('')}<select id="cle-startupTransition-background">${Object.values(names).map(name=>`<option>${name}</option>`).join('')}</select><pre>Custom Background</pre><div class="node-name">Custom Background</div><div class="particle-library-name">Custom Background.mp4</div></div><script src="/current.js"></script>`;
