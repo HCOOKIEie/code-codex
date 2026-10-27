@@ -74,8 +74,12 @@ jobs:
       - run: node scripts/generate-installer.mjs
       - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-worker-protocol.ps1
       - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-uninstall-completion.ps1
+      - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-uninstall-process-identity.ps1
+      - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-uninstall-menu-lifecycle.ps1
       - run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-login-startup-installer.ps1
       - run: powershell -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File scripts/test-startup-conflict.ps1
       - run: node --test scripts/test-refactor-contracts.mjs scripts/test-plugin-publication.mjs scripts/test-maintenance-isolation.mjs scripts/test-file-mutation-isolation.mjs
       - run: node scripts/test-background-surfaces.mjs
       - run: node scripts/test-login-startup.mjs
+      - run: node scripts/test-menu-session.mjs
+      - run: node scripts/test-language-runtime-upgrade.mjs

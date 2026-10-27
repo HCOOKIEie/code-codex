@@ -12,7 +12,7 @@ $stub=Join-Path $out 'fixture-core.exe'
 if($LASTEXITCODE -ne 0){throw 'Protocol fixture compilation failed'}
 $checks=New-Object Collections.Generic.List[string]
 function Check([bool]$Ok,[string]$Label){if(-not $Ok){throw $Label};$checks.Add($Label)}
-foreach($mode in @('checking','cancel','cancel-window','cancel-channel','failed','no-instance','ready')) {
+foreach($mode in @('checking','cancel','cancel-window','cancel-channel','failed','no-instance','ready','delayed-ready')) {
  $fixture=Join-Path $out ($mode+'-'+[Guid]::NewGuid().ToString('N'))
  $bin=Join-Path $fixture 'versions\test';[void][IO.Directory]::CreateDirectory($bin)
  [IO.File]::WriteAllText((Join-Path $fixture 'storage-layout.json'),'{"schema":1,"product":"Code-Codex"}')
@@ -60,7 +60,18 @@ foreach($mode in @('checking','cancel','cancel-window','cancel-channel','failed'
    Check (-not $window.HasExited -and $window.MainWindowHandle -eq [IntPtr]::Zero) ($mode+': diagnostic disappears while background verification keeps running')
    [IO.File]::WriteAllText((Join-Path $channel 'continue-recovery'),'continue')
   }
-  if($mode -in @('ready','checking','cancel')){
+  if($mode -eq 'delayed-ready') {
+   $end=[DateTime]::UtcNow.AddSeconds(8)
+   do {if(Test-Path -LiteralPath (Join-Path $channel 'delayed-pending')){break};Start-Sleep -Milliseconds 60}while([DateTime]::UtcNow -lt $end)
+   Check (Test-Path -LiteralPath (Join-Path $channel 'delayed-pending')) 'Delayed readiness gate is held by the disposable controller'
+   $pendingBytes=[IO.File]::ReadAllText((Join-Path $channel 'recovery.json'))
+   $flash=$false;$end=[DateTime]::UtcNow.AddSeconds(2)
+   do {$window.Refresh();if($window.MainWindowHandle -ne [IntPtr]::Zero){$flash=$true};Start-Sleep -Milliseconds 40}while([DateTime]::UtcNow -lt $end)
+   Check (-not $flash -and -not $window.HasExited) 'Compiled wrapper and real dialog remain hidden throughout aged pending startup'
+   Check ([IO.File]::ReadAllText((Join-Path $channel 'recovery.json')) -ceq $pendingBytes) 'Neither compiled wrapper nor dialog overwrites the pending state'
+   [IO.File]::WriteAllText((Join-Path $channel 'release-delayed-ready'),'continue')
+  }
+  if($mode -in @('ready','checking','cancel','delayed-ready')){
    Check ($process.WaitForExit(15000) -and $process.ExitCode -eq 0) ($mode+': verified ready or explicit cancel finishes successfully')
    Check ($window.WaitForExit(5000)) ($mode+': background diagnostic process exits instead of lingering over Codex')
   }else{

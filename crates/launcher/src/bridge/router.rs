@@ -76,6 +76,7 @@ impl BridgeHandler for NativeBridge {
                     #[cfg(not(windows))]
                     { Err(BridgeError::new("UNSUPPORTED","Opening the installation folder is unavailable on this platform.")) }
                 }
+                "explorer.installation.uninstall" => self.installation_uninstall(request.params, epoch).await,
                 "explorer.runtime.list" => {
                     crate::runtime_log::list().map_err(|e| BridgeError::new("RUNTIME_LOG", e))
                 }

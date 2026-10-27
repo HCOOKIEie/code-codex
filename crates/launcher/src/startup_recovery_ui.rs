@@ -12,7 +12,8 @@ use std::{
 };
 
 pub const CHANNEL_ENV: &str = "CLE_RECOVERY_UI_DIRECTORY";
-pub const READY_TIMEOUT_MS: u64 = 90_000;
+// Observation threshold only: the launch/qualification pipeline owns failure.
+pub const READINESS_DELAY_NOTICE_MS: u64 = 90_000;
 static CHANNEL: OnceLock<Mutex<Option<Channel>>> = OnceLock::new();
 
 struct Channel {
@@ -21,7 +22,7 @@ struct Channel {
     _window: Option<std::process::Child>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct State {
     pub schema: u8,
@@ -32,6 +33,8 @@ pub struct State {
     pub history: Vec<String>,
     pub old_exited: bool,
     pub relaunch_started_ms: Option<u64>,
+    #[serde(default)]
+    pub readiness_delayed: bool,
 }
 
 pub fn now_ms() -> u64 {
@@ -136,6 +139,7 @@ pub fn begin() -> Result<PathBuf, String> {
         history: vec!["Checking the existing instance before offering recovery.".into()],
         old_exited: false,
         relaunch_started_ms: None,
+        readiness_delayed: false,
     };
     write(&root, &state).map_err(|e| e.to_string())?;
     let window = if temporary.is_some() {
@@ -161,8 +165,11 @@ fn update(f: impl FnOnce(&mut State)) {
     let Ok(slot) = slot.lock() else { return };
     let Some(channel) = slot.as_ref() else { return };
     if let Ok(Some(mut state)) = read(&channel.root) {
+        let before = state.clone();
         f(&mut state);
-        let _ = write(&channel.root, &state);
+        if state != before {
+            let _ = write(&channel.root, &state);
+        }
     }
 }
 pub fn directory() -> Option<PathBuf> {
@@ -251,44 +258,52 @@ pub fn observe(source: &str, action: &str, outcome: &str, details: &Value) {
     if !ready_event(source, action, outcome, details) {
         return;
     }
-    update(|state| {
-        if !state.old_exited || state.phase == "failed" || state.phase == "cancelled" {
-            return;
-        }
-        state.phase = "ready".into();
-        state.diagnostic.stage = "Interface ready".into();
-        state.diagnostic.reason =
-            "The replacement instance has a visible same-version interface and a working Bridge."
-                .into();
-        state
-            .history
-            .push("Verified replacement interface and Bridge ready.".into());
-        state.history.truncate(64);
-    });
+    update(confirm_ready);
 }
-pub fn expire(state: &mut State, now: u64) -> bool {
-    if ["ready", "failed", "cancelled"].contains(&state.phase.as_str()) {
+fn confirm_ready(state: &mut State) {
+    if !state.old_exited || ["ready", "failed", "cancelled"].contains(&state.phase.as_str()) {
+        return;
+    }
+    state.phase = "ready".into();
+    state.diagnostic.stage = "Interface ready".into();
+    state.diagnostic.summary = "The replacement interface is ready".into();
+    state.diagnostic.reason =
+        "The replacement instance has a visible same-version interface and a working Bridge."
+            .into();
+    if state.history.len() == 64 {
+        state.history.remove(1);
+    }
+    state
+        .history
+        .push("Verified replacement interface and Bridge ready.".into());
+}
+// Only the core mutates post-consent recovery state. A delayed observation is
+// not evidence of failure; in particular, it cannot outrun initial document
+// qualification or overwrite a concurrent renderer-ready event in another process.
+pub fn note_readiness_delay(state: &mut State, now: u64) -> bool {
+    if state.readiness_delayed
+        || !state.old_exited
+        || ["ready", "failed", "cancelled"].contains(&state.phase.as_str())
+    {
         return false;
     }
     if state
         .relaunch_started_ms
-        .is_some_and(|start| now.saturating_sub(start) >= READY_TIMEOUT_MS)
+        .is_some_and(|start| now.saturating_sub(start) >= READINESS_DELAY_NOTICE_MS)
     {
-        state.phase = "failed".into();
-        state.diagnostic = StartupDiagnostic::new(
-            "CC-START-RECOVERY-READY-001",
-            "Waiting for replacement interface",
-            "The replacement interface has not confirmed readiness",
-            "The old instance exited, but no visible same-version interface with a working Bridge was observed within 90 seconds. Any remaining process was preserved; no automatic close or retry was issued.",
-            "Copy the report and inspect the last completed stage. A running process alone does not prove the interface is ready.",
-        );
-        state
-            .history
-            .push("CC-START-RECOVERY-READY-001: replacement readiness deadline expired.".into());
-        state.history.truncate(64);
+        state.readiness_delayed = true;
+        if state.history.len() == 64 {
+            state.history.remove(1);
+        }
+        state.history.push("CC-START-RECOVERY-WAIT-001: Interface readiness is still pending. Elapsed time alone is not a startup failure; the current launch continues without another close or retry.".into());
         return true;
     }
     false
+}
+pub fn check_readiness_delay() -> bool {
+    let mut delayed = false;
+    update(|state| delayed = note_readiness_delay(state, now_ms()));
+    delayed
 }
 pub fn presentation(state: &State) -> Value {
     json!({"phase":state.phase,"requestId":state.request_id,"restartAllowed":state.phase=="awaiting-consent",
@@ -352,28 +367,79 @@ mod tests {
             history: vec![],
             old_exited: true,
             relaunch_started_ms: Some(1000),
+            readiness_delayed: false,
         }
     }
     #[test]
-    fn old_exit_and_process_stage_are_never_readiness() {
+    fn delayed_launch_remains_pending_and_accepts_real_readiness() {
         let mut s = sample();
         advance(&mut s, "Codex activation", "process handle acquired");
         assert_eq!(s.phase, "verifying");
         assert_eq!(s.original.reason, "Original reason");
-        assert!(!expire(&mut s, 90_999));
-        assert!(expire(&mut s, 91_000));
-        assert_eq!(s.diagnostic.code, "CC-START-RECOVERY-READY-001");
-        advance(&mut s, "CDP", "late reply");
-        assert_eq!(s.phase, "failed");
+        assert!(!note_readiness_delay(&mut s, 90_999));
+        assert!(note_readiness_delay(&mut s, 91_000));
+        assert_eq!(s.phase, "verifying");
+        assert_eq!(s.original.reason, "Original reason");
+        assert!(!note_readiness_delay(&mut s, u64::MAX));
+        advance(
+            &mut s,
+            "renderer discovery",
+            "still qualifying the document",
+        );
+        assert_eq!(s.phase, "verifying");
+        confirm_ready(&mut s);
+        assert_eq!(s.phase, "ready");
+        assert!(s.readiness_delayed);
+        assert_eq!(
+            s.history.iter().filter(|s| s.contains("WAIT-001")).count(),
+            1
+        );
         assert_eq!(s.original.reason, "Original reason");
     }
     #[test]
-    fn completed_cancelled_and_failed_states_are_terminal_for_timeout() {
+    fn completed_cancelled_and_failed_states_cannot_be_reopened_by_a_delay_or_late_event() {
         for phase in ["ready", "failed", "cancelled"] {
             let mut s = sample();
             s.phase = phase.into();
-            assert!(!expire(&mut s, u64::MAX));
+            assert!(!note_readiness_delay(&mut s, u64::MAX));
+            confirm_ready(&mut s);
+            assert_eq!(s.phase, phase);
         }
+    }
+    #[test]
+    fn observed_slow_start_replay_never_becomes_a_failure() {
+        let mut s = sample();
+        // User's .36 trace: timeout at103s, valid no-project128s, tree ready147s.
+        for elapsed in [24_040, 27_069, 103_582, 124_785, 127_725] {
+            note_readiness_delay(&mut s, 1000 + elapsed);
+            assert_eq!(s.phase, "verifying");
+        }
+        let evidence =
+            json!({"version":env!("CARGO_PKG_VERSION"),"bridgeAvailable":true,"visible":true});
+        assert!(ready_event(
+            "renderer",
+            "file tree state",
+            "no-project",
+            &evidence
+        ));
+        confirm_ready(&mut s);
+        assert!(!note_readiness_delay(&mut s, 1000 + 146_618));
+        assert_eq!(s.phase, "ready");
+    }
+    #[test]
+    fn delay_is_bounded_and_never_creates_a_report_before_relaunch() {
+        let mut s = sample();
+        s.old_exited = false;
+        assert!(!note_readiness_delay(&mut s, u64::MAX));
+        s.old_exited = true;
+        s.relaunch_started_ms = None;
+        assert!(!note_readiness_delay(&mut s, u64::MAX));
+        s.relaunch_started_ms = Some(1000);
+        s.history = vec!["original".into(); 64];
+        assert!(note_readiness_delay(&mut s, 91_000));
+        confirm_ready(&mut s);
+        assert_eq!(s.history.len(), 64);
+        assert_eq!(s.history[0], "original");
     }
     #[test]
     fn readiness_requires_current_version_visible_bridge_not_just_a_process_or_cdp_reply() {

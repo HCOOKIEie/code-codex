@@ -127,12 +127,9 @@ fn main() -> ExitCode {
             live_directory
                 .as_ref()
                 .and_then(|dir| match startup_recovery_ui::read(dir.path()) {
-                    Ok(Some(mut state)) => {
-                        if startup_recovery_ui::expire(&mut state, startup_recovery_ui::now_ms()) {
-                            let _ = startup_recovery_ui::write(dir.path(), &state);
-                        }
-                        Some(state)
-                    }
+                    // The core owns readiness and failures. Never turn a UI
+                    // observation deadline into a competing recovery-state write.
+                    Ok(Some(state)) => Some(state),
                     _ => None,
                 });
         if let Some(state) = recovery.as_ref() {

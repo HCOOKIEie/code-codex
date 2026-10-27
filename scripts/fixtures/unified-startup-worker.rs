@@ -10,7 +10,11 @@ fn phase(root: &PathBuf, base: &str, value: &str, reason: &str, old: bool) {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis();
-    let timestamp = now.to_string();
+    let timestamp = if env::var("CLE_UNIFIED_FIXTURE_MODE").as_deref() == Ok("delayed-ready") {
+        now.saturating_sub(600_000).to_string()
+    } else {
+        now.to_string()
+    };
     let text = base
         .replace("__PHASE__", value)
         .replace("REASON", reason)
@@ -38,10 +42,19 @@ fn main() {
         r#"{{"schema":1,"requestId":"fixture-core-123","phase":"__PHASE__","diagnostic":{d},"original":{original},"history":["ORIGINAL_CONFLICT_EVIDENCE","old exit is not success"],"oldExited":__OLD__,"relaunchStartedMs":__START_MS__}}"#
     );
     if mode == "checking" {
-        phase(&root, &base, "checking", "Internal inspection; no prompt yet", false);
-        let deadline=std::time::Instant::now();
+        phase(
+            &root,
+            &base,
+            "checking",
+            "Internal inspection; no prompt yet",
+            false,
+        );
+        let deadline = std::time::Instant::now();
         while !root.join("allow-consent").exists() {
-            assert!(deadline.elapsed()<Duration::from_secs(25),"Consent test gate timed out");
+            assert!(
+                deadline.elapsed() < Duration::from_secs(25),
+                "Consent test gate timed out"
+            );
             thread::sleep(Duration::from_millis(30));
         }
     }
@@ -68,9 +81,12 @@ fn main() {
         return;
     }
     phase(&root, &base, "closing", "Closing disposable fixture", false);
-    let deadline=std::time::Instant::now();
+    let deadline = std::time::Instant::now();
     while !root.join("continue-recovery").exists() {
-        assert!(deadline.elapsed()<Duration::from_secs(25),"Background test gate timed out");
+        assert!(
+            deadline.elapsed() < Duration::from_secs(25),
+            "Background test gate timed out"
+        );
         thread::sleep(Duration::from_millis(30));
     }
     phase(
@@ -81,6 +97,24 @@ fn main() {
         true,
     );
     thread::sleep(Duration::from_millis(300));
+    if mode == "delayed-ready" {
+        phase(
+            &root,
+            &base,
+            "verifying",
+            "Aged pending state; launch continues",
+            true,
+        );
+        fs::write(root.join("delayed-pending"), b"pending").unwrap();
+        let deadline = std::time::Instant::now();
+        while !root.join("release-delayed-ready").exists() {
+            assert!(
+                deadline.elapsed() < Duration::from_secs(25),
+                "Delayed readiness test gate timed out"
+            );
+            thread::sleep(Duration::from_millis(30));
+        }
+    }
     if mode == "no-instance" {
         return;
     }

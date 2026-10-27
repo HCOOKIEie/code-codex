@@ -91,6 +91,7 @@ mod layout_observation_tests {
 
 #[cfg(test)]
 mod tests {
+    include!("initial_wait_tests.rs");
 
     #[test]
     fn detailed_protocol_errors_preserve_kind_and_hide_payload() {

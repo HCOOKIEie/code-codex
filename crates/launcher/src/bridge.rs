@@ -3132,6 +3132,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn uninstall_menu_rejects_renderer_paths_and_stale_documents() {
+        let (_directory, bridge) = manual_bridge().await;
+        for params in [json!(null), json!([]), json!({"root":"C:/untrusted"}), json!({"silent":true}), json!({"purge":true})] {
+            assert_eq!(bridge.handle(request("explorer.installation.uninstall", params)).await.unwrap_err().code, "INVALID_REQUEST");
+        }
+        bridge.invalidate_lifecycle();
+        assert_eq!(bridge.handle(request_at("explorer.installation.uninstall", json!({}), 0)).await.unwrap_err().code, "CANCELLED");
+    }
+
+    #[tokio::test]
     async fn login_startup_rejects_invalid_payloads_and_invalidated_documents() {
         let (_directory, bridge) = manual_bridge().await;
         for (method, params) in [
@@ -4015,6 +4025,8 @@ mod routes_mutation;
 mod routes_settings;
 #[path = "bridge/routes/login_startup.rs"]
 mod routes_login_startup;
+#[path = "bridge/routes/installation.rs"]
+mod routes_installation;
 
 #[path = "bridge/routes/updates.rs"]
 mod routes_updates;

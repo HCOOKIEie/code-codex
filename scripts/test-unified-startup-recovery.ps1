@@ -140,13 +140,19 @@ try {
   Dispose-Dialog $dialog;$dialog=$null
  }
 
- # Deliberately age the clock; no 90-second real sleep or real Codex close.
- $s=New-State 'verifying';$s.oldExited=$true;$s.relaunchStartedMs=[DateTimeOffset]::UtcNow.AddSeconds(-91).ToUnixTimeMilliseconds();Write-State $s
+ # Replay a delayed but healthy launch through the production form. The UI
+ # must never write a failure over the core's pending/ready state.
+ $s=New-State 'verifying';$s.oldExited=$true;$s.relaunchStartedMs=[DateTimeOffset]::UtcNow.AddMinutes(-10).ToUnixTimeMilliseconds();Write-State $s
+ $pendingBytes=[IO.File]::ReadAllText((Join-Path $root 'recovery.json'))
  $dialog=New-CodeCodexStartupDialog;$dialog.Form.StartPosition='Manual';$dialog.Form.Location=New-Object Drawing.Point(-12000,-12000);$dialog.Form.Show();Pump
  $state=ConvertFrom-Json -InputObject ([IO.File]::ReadAllText((Join-Path $root 'recovery.json')))
- Check ($state.phase -ceq 'failed' -and $state.diagnostic.code -ceq 'CC-START-RECOVERY-READY-001') 'Old exit without verified UI expires as readiness failure'
- Check ($dialog.Cancel.Enabled -and $dialog.Form.Visible) 'Timeout leaves a reviewable report instead of an endless busy state'
- Dispose-Dialog $dialog;$dialog=$null
+ Check ($state.phase -ceq 'verifying' -and -not $dialog.Form.Visible) 'Aged live startup never displays a timer-generated error'
+ Check ([IO.File]::ReadAllText((Join-Path $root 'recovery.json')) -ceq $pendingBytes) 'Diagnostic form cannot overwrite the core recovery state'
+ $s.phase='ready';$s.diagnostic.reason='Actual same-version visible interface and Bridge ready';Write-State $s
+ $readyBytes=[IO.File]::ReadAllText((Join-Path $root 'recovery.json'));Pump
+ Check (-not $dialog.Form.Visible -and -not $script:recoveryBusy) 'Delayed real readiness closes the diagnostic without a failure flash'
+ Check ([IO.File]::ReadAllText((Join-Path $root 'recovery.json')) -ceq $readyBytes) 'Late-ready evidence is never replaced by an obsolete UI deadline'
+ $dialog.Timer.Dispose();$dialog.Form.Dispose();$dialog=$null
 
  Write-State (New-State 'verifying')
  $env:CLE_ERROR_OWNER_PID='2147483647'

@@ -226,20 +226,8 @@ function script:Update-CodeCodexStartupDialog {
                 if ($recovery.schema -ne 1 -or [string]::IsNullOrWhiteSpace($recovery.requestId) -or
                     $recovery.phase -notin @('checking','awaiting-consent','closing','verifying-exit','old-exited','relaunching','verifying','ready','failed','cancelled')) { throw 'Invalid startup recovery state schema' }
                 if ($recovery.schema -eq 1) {
-                    if ($recovery.oldExited -and $null -ne $recovery.relaunchStartedMs -and
-                        $recovery.phase -notin @('ready','failed','cancelled') -and
-                        ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()-[long]$recovery.relaunchStartedMs) -ge 90000) {
-                        $recovery.phase='failed'
-                        $recovery.diagnostic.code='CC-START-RECOVERY-READY-001'
-                        $recovery.diagnostic.stage='Waiting for replacement interface'
-                        $recovery.diagnostic.reason='The old instance exited, but a visible replacement interface and Bridge were not verified within 90 seconds. No process was closed again.'
-                        $recovery.diagnostic.guidance='Copy the diagnostic report and inspect the last completed stage. A running process alone is not readiness.'
-                        $temporary=Join-Path $env:CLE_RECOVERY_UI_DIRECTORY ([Guid]::NewGuid().ToString('N')+'.tmp')
-                        try {
-                            [IO.File]::WriteAllText($temporary,($recovery|ConvertTo-Json -Depth 12 -Compress),[Text.UTF8Encoding]::new($false))
-                            [IO.File]::Replace($temporary,$recoveryFile,[NullString]::Value)
-                        } finally {if([IO.File]::Exists($temporary)){[IO.File]::Delete($temporary)}}
-                    }
+                    # Read-only presentation: only the core owns readiness/failure.
+                    # A slow but live launch must not be failed by a second UI clock.
                     $script:recoveryRequestId=$recovery.requestId
                     $phase=$recovery.phase
                     $allowed=$phase -ceq 'awaiting-consent'

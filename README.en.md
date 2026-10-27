@@ -48,7 +48,7 @@ A subdued green arrow appears beside the version when an update is available; an
 
 
 
-> Local test build v0.5.31 reconciles stale process snapshot entries after shutdown. OpenProcess87 on a nonzero PID requires a complete fresh snapshot confirming that PID is absent, then a full rescan. Present, inaccessible or unknown processes still block relaunch. Retains bounded teardown, the compact diagnostic and global-language Suggested action. Includes PR #66 and unmerged PR #67; login startup defaults off. Known dismissed-tree/menu and localized login-error issues remain. Not publicly released.
+> Local test build v0.5.38 keeps waiting for the initial native page beyond the 120-second observation budget without closing Codex. A prolonged startup animation yields to the native interface without inferring readiness or network failure. Retains silent delayed restart recovery and real readiness checks. Retains protection that prevents an old injected language service from overwriting the current runtime, restores the centered concise login-startup confirmation and complete bilingual controls, and localizes all 26 plugin display names. Retains native-style menu highlight/hover, right-aligned checks and the uninstall-wizard entry. Plugin IDs, download URLs and bytes remain unchanged. PR #67 is not merged on GitHub; this build is not publicly released.
 
 ## Install Option 1: Download EXE
 

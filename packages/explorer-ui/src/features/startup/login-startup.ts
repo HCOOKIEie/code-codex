@@ -1,5 +1,6 @@
 import type { LoginStartupActions, LoginStartupStatus } from '../../contracts/login-startup';
 import { t } from '../../i18n';
+import { ApplicationDialog } from '../../components/application-dialog';
 
 /** Owns the menu control only; no optimistic OS state or reconnect write replay. */
 export class LoginStartupController {
@@ -7,15 +8,23 @@ export class LoginStartupController {
   private pending = false;
   private disposed = false;
   private failed = false;
+  private readonly dialog = new ApplicationDialog();
+  private readonly label = document.createElement('span');
+  private readonly check = document.createElement('span');
 
   constructor(private readonly button: HTMLButtonElement, private readonly actions: LoginStartupActions) {
     button.setAttribute('role', 'menuitemcheckbox');
     button.dataset.codeCodexLoginStartup = 'true';
+    this.check.dataset.codeCodexMenuCheck = 'true';
+    this.check.setAttribute('aria-hidden', 'true');
+    this.check.textContent = '✓';
+    button.append(this.label, this.check);
     this.render();
   }
 
   render(): void {
-    this.button.textContent = `${this.state?.enabled ? '✓  ' : '　 '}${t(this.failed ? 'loginStartup.revoke' : 'loginStartup.label')}`;
+    this.label.textContent = t(this.failed ? 'loginStartup.revoke' : 'loginStartup.label');
+    this.check.hidden = !this.state?.enabled;
     this.button.setAttribute('aria-checked', String(this.state?.enabled ?? false));
     this.button.setAttribute('aria-busy', String(this.pending));
     this.button.disabled = this.pending || (!this.failed && (!this.state || !this.state.supported));
@@ -48,17 +57,18 @@ export class LoginStartupController {
   async toggle(): Promise<void> {
     if (this.button.disabled || this.pending || this.disposed) return;
     const enabled = this.failed ? false : !this.state?.enabled;
-    if (enabled && !window.confirm(t('loginStartup.confirm'))) return;
     this.pending = true;
     this.render();
     try {
+      if (enabled && !await this.dialog.confirm('loginStartup.title', 'loginStartup.confirm')) return;
+      if (this.disposed) return;
       const value = await this.actions.setLoginStartup(enabled);
       if (!this.disposed) this.accept(value);
     } catch (error) {
       if (!this.disposed) {
         this.state = undefined;
         this.failed = true;
-        window.alert(`${t('loginStartup.failed')}\n${String(error)}`);
+        window.alert(`Login startup could not be confirmed. Click the menu item to turn it off, or use code-codex login-startup --disable.\n${String(error)}`);
       }
     } finally {
       this.pending = false;
@@ -66,5 +76,5 @@ export class LoginStartupController {
     }
   }
 
-  dispose(): void { this.disposed = true; }
+  dispose(): void { this.disposed = true; this.dialog.dispose(); }
 }

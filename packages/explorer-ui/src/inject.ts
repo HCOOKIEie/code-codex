@@ -4,6 +4,7 @@ import { monitorStartupReadiness } from './startup-readiness';
 import { getBootstrapConfig } from "./bridge";
 import { prepareStartupTransitionHandoff, getEarlyStartupTransition } from "./startup-transition-plugin";
 import { reconcileApplicationMenu } from "./application-menu";
+import { requestApplicationMenu } from './host/bridge/application-menu';
 import { openRuntimeInformation, observeCodexRuntime } from "./runtime-information";
 import { runtimeEvent } from "./runtime-events";
 import { CodeCodexElement } from "./app/explorer-element";
@@ -514,13 +515,12 @@ function revealExplorer(): CodeCodexElement | null {
 
 const applicationMenuActions = {
   getLoginStartup: () => {
-    const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG) ?? revealExplorer();
-    return explorer?.isConnected ? explorer.getLoginStartup() : Promise.reject(new Error('Code-Codex is disconnected'));
+    return requestApplicationMenu<import('./contracts/login-startup').LoginStartupStatus>('explorer.login.startup.get');
   },
   setLoginStartup: (enabled: boolean) => {
-    const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG) ?? revealExplorer();
-    return explorer?.isConnected ? explorer.setLoginStartup(enabled) : Promise.reject(new Error('Code-Codex is disconnected'));
+    return requestApplicationMenu<import('./contracts/login-startup').LoginStartupStatus>('explorer.login.startup.set', { enabled });
   },
+  openUninstaller: () => requestApplicationMenu<{ opened: boolean }>('explorer.installation.uninstall'),
   openRuntimeInformation: () => { void openRuntimeInformation(); },
   openInstallationFolder: () => {
     const explorer = document.querySelector<CodeCodexElement>(EXPLORER_TAG) ?? revealExplorer();
