@@ -517,7 +517,32 @@ mod tests {
     #[test]
     fn actual_open87_refresh_still_finds_a_new_live_browser() {
         let (_directory, image, entry) = actual_stale_entry();
-        let mut replacement = snapshot_child(&image, 5000);
+        let ready = _directory.path().join("replacement-ready");
+        use std::os::windows::process::CommandExt;
+        let mut replacement = std::process::Command::new(&image)
+            .args([
+                "--exact",
+                "process_preflight::tests::image_query_exit_fixture",
+                "--test-threads=1",
+            ])
+            .env("CLE_PREFLIGHT_EXIT_FIXTURE", "15000")
+            .env("CLE_PREFLIGHT_READY_FILE", &ready)
+            .creation_flags(0x0800_0000)
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let ready_started = Instant::now();
+        while !ready.is_file()
+            && replacement.try_wait().unwrap().is_none()
+            && ready_started.elapsed() < Duration::from_secs(5)
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if !ready.is_file() {
+            let _ = replacement.kill();
+            let _ = replacement.wait();
+            panic!("Replacement fixture did not confirm initialization before snapshot test");
+        }
         let result = scan_entries(
             &image,
             "snapshot-exit-fixture.exe",
@@ -650,6 +675,9 @@ mod tests {
     #[test]
     fn image_query_exit_fixture() {
         if std::env::var_os("CLE_PREFLIGHT_EXIT_FIXTURE").is_some() {
+            if let Some(path) = std::env::var_os("CLE_PREFLIGHT_READY_FILE") {
+                std::fs::write(path, b"ready").unwrap();
+            }
             let ms = std::env::var("CLE_PREFLIGHT_EXIT_FIXTURE")
                 .ok()
                 .and_then(|v| v.parse().ok())

@@ -278,7 +278,7 @@ try {
         $errors=$worker.StandardError.ReadToEnd()
         Verify ($worker.WaitForExit(10000)) 'Bootstrap worker exits'
         Verify ($worker.ExitCode -eq 0) ('Bootstrap worker succeeds: '+$errors)
-        Verify (-not $errors.Contains('CLIXML')) 'Progress cannot contaminate native diagnostics with CLIXML'
+        Verify (-not $errors.Contains('CLIXML')) ('Progress cannot contaminate native diagnostics with CLIXML; synthetic worker stderr: '+$errors)
         Verify ($reply -ceq ('reset|'+[char]0x4e2d+[char]0x6587)) 'Unicode and long script transport roundtrip'
     } finally {
         if(-not $worker.HasExited){$worker.Kill();[void]$worker.WaitForExit(5000)}
